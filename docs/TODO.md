@@ -48,28 +48,28 @@ Lista de tarefas do projeto Plaiground MCP, organizadas por prioridade de implem
 
 - [x] Desenvolver aplicação cliente web de demonstração
 - [x] Criar cliente de linha de comando
-- [~] Implementar exemplos de uso de ferramentas
-- [ ] Criar recursos de exemplo
-- [ ] Desenvolver demo de chat usando MCP
-- [ ] Criar exemplo de uso com modelos de linguagem
-- [ ] Implementar exemplos de uso de controle de acesso
+- [x] Implementar exemplos de uso de ferramentas
+- [x] Criar recursos de exemplo
+- [x] Desenvolver demo de chat usando MCP
+- [x] Criar exemplo de uso com modelos de linguagem
+- [x] Implementar exemplos de uso de controle de acesso
 
 ## Fase 5: Melhorias e Testes
 
-- [ ] Implementar testes de integração cliente-servidor
-- [ ] Adicionar testes de stress e performance
-- [ ] Resolver warnings e erros TypeScript pendentes
-- [ ] Melhorar cobertura de testes unitários
-- [ ] Padronizar tratamento de erros
-- [ ] Implementar métricas de desempenho
-- [ ] Adicionar isolamento completo entre sessões
-- [ ] Criar documentação interativa da API
+- [x] Implementar testes de integração cliente-servidor
+- [x] Adicionar testes de stress e performance
+- [~] Resolver warnings e erros TypeScript pendentes
+- [~] Melhorar cobertura de testes unitários
+- [x] Padronizar tratamento de erros
+- [x] Implementar métricas de desempenho
+- [x] Adicionar isolamento completo entre sessões
+- [x] Criar documentação interativa da API
 
 ## Fase 6: Recursos Avançados
 
-- [ ] Implementar streaming bidirecional de conteúdo
-- [ ] Adicionar suporte a chamadas de função no cliente
-- [ ] Implementar gerenciamento de memória contextual
+- [x] Implementar streaming bidirecional de conteúdo
+- [~] Adicionar suporte a chamadas de função no cliente
+- [~] Implementar gerenciamento de memória contextual
 - [ ] Criar sistema de plugins para extensão
 - [ ] Adicionar suporte a múltiplos formatos (OpenAI, etc)
 - [ ] Implementar balanceamento de carga
