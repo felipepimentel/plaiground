@@ -1,0 +1,120 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# UI Components
+
+## Design System
+
+Plaiground uses a consistent design system with these core principles:
+
+1. **Visual Hierarchy**: Clear information architecture with proper emphasis
+2. **Progressive Disclosure**: Complex features revealed progressively
+3. **Responsive Design**: Works across different screen sizes
+4. **Accessibility**: WCAG 2.1 AA compliance for all components
+5. **Performance**: Optimized rendering and minimal dependencies
+
+## Component Architecture
+
+All UI components follow these patterns:
+
+### Component Structure
+
+```tsx
+// Standard component structure
+import React from 'react';
+import styles from './ComponentName.module.css';
+import { useComponentHook } from '../../hooks/useComponentHook';
+
+interface ComponentNameProps {
+  // Props defined with clear types
+  primaryProp: string;
+  secondaryProp?: number;
+  onAction?: (param: string) => void;
+}
+
+export const ComponentName: React.FC<ComponentNameProps> = ({
+  primaryProp,
+  secondaryProp = 0, // Default values for optional props
+  onAction,
+}) => {
+  // Component logic
+  const { state, actions } = useComponentHook();
+  
+  // Event handlers
+  const handleEvent = () => {
+    // Implementation
+    onAction?.('value');
+  };
+  
+  // Render
+  return (
+    <div className={styles.container}>
+      {/* Component content */}
+    </div>
+  );
+};
+```
+
+### Component Organization
+
+Components are organized into:
+
+1. **Atoms**: Basic building blocks (buttons, inputs, icons)
+2. **Molecules**: Groups of atoms (form fields, search bars)
+3. **Organisms**: Complex UI sections (navigation, tool panels)
+4. **Templates**: Page layouts
+5. **Pages**: Complete views
+
+## Key UI Features
+
+### Visual Flow Designer
+
+The flow designer implements:
+
+- Drag-and-drop interaction
+- Node-based graph visualization
+- Connection management
+- Visual feedback for active states
+- Undo/redo capability
+
+### Interactive Protocol Visualizer
+
+The protocol visualizer provides:
+
+- Timeline-based visualization
+- Message inspection
+- Search and filtering
+- Message grouping
+- Error highlighting
+
+### Split-view Comparison
+
+The comparison view implements:
+
+- Side-by-side or vertical comparison modes
+- Synchronized scrolling
+- Diff highlighting
+- JSON/text format switching
+- Collapsible sections
+
+## Styling Approach
+
+Plaiground uses:
+
+1. CSS Modules for component-scoped styling
+2. Tailwind for utility classes
+3. CSS variables for theming
+4. Responsive design with mobile-first approach
+5. Dark mode support
+
+## Accessibility Guidelines
+
+All components must:
+
+1. Have appropriate ARIA attributes
+2. Support keyboard navigation
+3. Maintain sufficient color contrast
+4. Include proper focus management
+5. Provide text alternatives for non-text content

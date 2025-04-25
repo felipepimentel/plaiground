@@ -1,0 +1,82 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Feature Priorities
+
+## Core Principles
+
+All feature development should follow these principles:
+
+1. **User Experience First**: Prioritize features that improve the developer experience
+2. **Progressive Enhancement**: Build core functionality first, then enhance
+3. **Incremental Value**: Each feature should provide value on its own
+4. **Quality Over Quantity**: Do fewer things better rather than more things poorly
+
+## Development Phases
+
+### Phase 1: Foundation (Current)
+
+Focus on establishing core architecture and essential MCP testing capabilities:
+
+- [ ] Basic MCP Host implementation
+- [ ] Reliable MCP Client implementation
+- [ ] Server connection management
+- [ ] Simple resource browser
+- [ ] Basic tool testing interface
+- [ ] Protocol message inspection
+- [ ] Core UI components
+
+### Phase 2: Enhanced UX
+
+Improve the user experience with key visual features:
+
+- [ ] Visual Flow Designer (basic functionality)
+- [ ] Split-view comparison tool
+- [ ] Improved resource browser with search and filtering
+- [ ] History and session management
+- [ ] Improved error handling and visualization
+- [ ] Settings and preferences management
+
+### Phase 3: Advanced Features
+
+Add powerful capabilities for more complex testing and debugging:
+
+- [ ] Real-time collaboration
+- [ ] Advanced Visual Flow Designer
+- [ ] Server Blueprint Generation
+- [ ] Performance analytics dashboard
+- [ ] AI-assisted debugging
+- [ ] Visual protocol tracing
+- [ ] Export/import of test scenarios
+
+### Phase 4: Ecosystem
+
+Extend the platform to integrate with the broader development ecosystem:
+
+- [ ] Plugin system for custom extensions
+- [ ] Integration with CI/CD pipelines
+- [ ] Documentation generation
+- [ ] API for programmatic access
+- [ ] Advanced authentication and security features
+- [ ] Enterprise features (user management, team collaboration)
+
+## Current Focus
+
+The team is currently focused on these immediate priorities:
+
+1. Completing the core MCP Host implementation
+2. Building the initial client UI with basic MCP server testing capabilities
+3. Implementing the resource browser and tool testing interfaces
+4. Setting up proper testing infrastructure
+
+## Feature Request Guidelines
+
+When proposing new features, consider:
+
+1. How does it align with our core principles?
+2. Which development phase does it belong in?
+3. What specific user problems does it solve?
+4. What are the implementation requirements and dependencies?
+5. How would we measure success for this feature?

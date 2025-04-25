@@ -1,0 +1,145 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP Protocol Standards
+
+## Protocol Overview
+
+The Model Context Protocol (MCP) is a client-server protocol designed to connect AI applications with external data sources and tools. Key characteristics:
+
+- JSON-RPC 2.0 based messaging
+- Supports multiple transport mechanisms
+- Stateful session-oriented protocol
+- Capability negotiation for feature discovery
+- Supports resources, tools, and prompts
+
+## Message Structure
+
+All MCP messages follow the JSON-RPC 2.0 standard with these fields:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "unique-request-id",
+  "method": "method.name",
+  "params": {
+    // Method-specific parameters
+  }
+}
+```
+
+Success responses:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "matching-request-id",
+  "result": {
+    // Method-specific result data
+  }
+}
+```
+
+Error responses:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "matching-request-id",
+  "error": {
+    "code": -32000,
+    "message": "Error message",
+    "data": {
+      // Optional additional error information
+    }
+  }
+}
+```
+
+## Transport Mechanisms
+
+MCP supports multiple transport mechanisms:
+
+1. **HTTP/SSE**: 
+   - HTTP POST for client requests
+   - Server-Sent Events for server responses and notifications
+   - Supports authentication via headers
+
+2. **WebSocket**:
+   - Bidirectional communication
+   - JSON-RPC messages in both directions
+   - Efficient for high-frequency messaging
+
+3. **stdio**:
+   - Standard input/output communication
+   - Used for local process integration
+   - Useful for development and testing
+
+## Core Protocol Methods
+
+### Capability Negotiation
+
+- `server.capabilities` - Discover server features
+- `client.capabilities` - Inform server of client capabilities
+- `server.info` - Get server name, version, and description
+
+### Resource Management
+
+- `resources.list` - List available resources
+- `resources.read` - Read resource content
+- `resources.subscribe` - Subscribe to resource changes
+
+### Tool Handling
+
+- `tools.list` - List available tools
+- `tools.call` - Execute a tool with parameters
+
+### Prompt Templates
+
+- `prompts.list` - List available prompt templates
+- `prompts.render` - Render a prompt with parameters
+
+### Sampling
+
+- `sampling.permissions` - Request permissions for model access
+- `sampling.complete` - Request text completion from model
+
+## Error Handling
+
+Standard error codes:
+
+- `-32700`: Parse error - Invalid JSON
+- `-32600`: Invalid request - Malformed request
+- `-32601`: Method not found
+- `-32602`: Invalid params
+- `-32603`: Internal error
+- `-32000 to -32099`: Server error
+
+MCP-specific error codes:
+
+- `-32100`: Resource not found
+- `-32101`: Resource access denied
+- `-32102`: Tool not found
+- `-32103`: Tool execution error
+- `-32104`: Prompt not found
+- `-32105`: Sampling error
+
+## Security Requirements
+
+- Authentication via Bearer tokens
+- Transport-level encryption (TLS)
+- Permission-based access control
+- Clear error messages without exposing sensitive information
+- Resource path validation to prevent directory traversal
+
+## Protocol Extensions
+
+Plaiground supports these MCP extensions:
+
+- Enhanced tool progress notifications
+- Detailed error information for debugging
+- Session persistence
+- Multi-client coordination
+- Resource batching for efficiency

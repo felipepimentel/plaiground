@@ -1,0 +1,87 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP Client Implementation
+
+## Architecture Overview
+
+The MCP Client is responsible for maintaining a 1:1 connection with a specific MCP server. Each client:
+
+1. Handles protocol message serialization/deserialization
+2. Manages connection state and reconnection logic
+3. Provides APIs for resource access, tool execution, and prompt handling
+4. Implements capability negotiation
+5. Maintains caches for efficient resource access
+
+## Key Components
+
+### ConnectionManager
+
+The `ConnectionManager` handles:
+
+- Transport selection and initialization
+- Connection lifecycle (connect, disconnect, reconnect)
+- Authentication and credentials management
+- Network error handling and retry logic
+
+### MessageHandler
+
+The `MessageHandler` processes:
+
+- Protocol message formatting
+- Request/response correlation
+- Stream management
+- Error detection and reporting
+
+### ResourceCache
+
+The `ResourceCache` provides:
+
+- Local caching of server resources
+- Cache invalidation policy
+- Resource dependency tracking
+- Subscription management
+
+### ToolExecutor
+
+The `ToolExecutor` supports:
+
+- Tool invocation with parameters
+- Result handling and transformation
+- Execution monitoring
+- Progress tracking
+
+### PromptManager
+
+The `PromptManager` facilitates:
+
+- Prompt template management
+- Parameter validation
+- Prompt execution
+- Response handling
+
+## Implementation Guidelines
+
+1. **Robustness**:
+   - Graceful handling of server disconnections
+   - Automatic reconnection with exponential backoff
+   - Clear error states and recovery paths
+
+2. **Efficiency**:
+   - Smart caching strategies
+   - Connection pooling where appropriate
+   - Minimal redundant requests
+
+3. **Usability**:
+   - Clear, consistent API surface
+   - Comprehensive error messages
+   - Proper TypeScript typings
+   - Progressive enhancement for optional features
+
+4. **Monitoring**:
+   - Performance metrics collection
+   - Detailed logging
+   - Debugging aids
+   - Connection state visibility

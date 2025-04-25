@@ -1,0 +1,87 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Coding Standards
+
+## TypeScript Guidelines
+
+- Use TypeScript for all new code
+- Maintain strict type checking (`"strict": true`)
+- Prefer interfaces for public APIs and types for internal structures
+- Use generics to create reusable components
+- Explicitly declare return types for functions with non-obvious returns
+- Minimize use of `any` and `unknown`
+
+## Naming Conventions
+
+- **Files**: 
+  - React components: PascalCase.tsx
+  - Hooks: camelCase.ts with 'use' prefix
+  - Utilities: camelCase.ts
+  - Tests: [filename].test.ts
+
+- **Variables/Functions**:
+  - Use camelCase for variables and functions
+  - Use PascalCase for classes and React components
+  - Use UPPER_SNAKE_CASE for constants
+  - Prefix boolean variables with 'is', 'has', 'should', etc.
+
+- **Interfaces/Types**:
+  - Interfaces: PascalCase, no 'I' prefix
+  - Type aliases: PascalCase
+  - Enums: PascalCase
+
+## Code Organization
+
+- One component/class per file
+- Group related functions in utility files
+- Keep files under 400 lines where possible
+- Organize imports in groups:
+  1. External libraries
+  2. Internal absolute imports
+  3. Relative imports
+  4. Style imports
+
+## React Best Practices
+
+- Use functional components with hooks
+- Extract complex logic to custom hooks
+- Memoize callbacks with useCallback for props passed to child components
+- Memoize expensive calculations with useMemo
+- Use React.memo for pure components
+- Handle side effects in useEffect with proper dependency arrays
+
+## Testing Standards
+
+- Write unit tests for all critical functionality
+- Use meaningful test descriptions
+- Follow the Arrange-Act-Assert pattern
+- Mock external dependencies
+- Test component rendering and interactions
+- Aim for >80% test coverage
+
+## Error Handling
+
+- Use typed errors where possible
+- Provide meaningful error messages
+- Implement appropriate error boundaries in React
+- Log errors with context information
+- Handle promise rejections and async errors consistently
+
+## Performance Considerations
+
+- Avoid blocking the main thread with long calculations
+- Implement virtualization for long lists
+- Optimize component re-renders
+- Use code-splitting for large components
+- Implement proper loading and error states
+
+## Documentation
+
+- Document public APIs with JSDoc comments
+- Include examples for complex functions
+- Document component props thoroughly
+- Keep documentation close to the code
+- Update documentation when changing code

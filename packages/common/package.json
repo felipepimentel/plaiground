@@ -1,0 +1,20 @@
+{
+    "name": "@plaiground/common",
+    "version": "0.1.0",
+    "description": "Shared types and utilities for Plaiground",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "scripts": {
+        "build": "tsup src/index.ts --format cjs,esm --dts",
+        "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+        "clean": "rm -rf dist",
+        "lint": "eslint src --ext .ts,.tsx",
+        "test": "vitest run"
+    },
+    "devDependencies": {
+        "eslint": "^8.44.0",
+        "tsup": "^7.1.0",
+        "typescript": "^5.2.2",
+        "vitest": "^0.32.2"
+    }
+}

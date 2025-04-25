@@ -1,0 +1,97 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Project Structure
+
+## Main Directories
+
+```
+plaiground/
+├── packages/           # Monorepo packages
+│   ├── client/         # Frontend React application
+│   ├── server/         # Backend Node.js server
+│   ├── mcp-host/       # MCP Host implementation
+│   ├── mcp-client/     # MCP Client implementation
+│   └── common/         # Shared utilities and types
+├── tools/              # Development and build tools
+├── scripts/            # Utility scripts for development
+├── docs/               # Documentation
+└── .github/            # GitHub workflows and templates
+```
+
+## Key Configuration Files
+
+- `package.json`: Root package with workspace configuration
+- `tsconfig.json`: Base TypeScript configuration
+- `vite.config.ts`: Vite configuration for client package
+- `.env.example`: Example environment variables
+- `docker-compose.yml`: Development and testing environment setup
+
+## Package: client
+
+The `packages/client` directory contains the React frontend application:
+
+```
+client/
+├── src/
+│   ├── components/     # React components
+│   │   ├── layout/     # Layout components
+│   │   ├── flow/       # Visual flow designer
+│   │   ├── tools/      # Tool testing interfaces
+│   │   ├── resources/  # Resource browser
+│   │   ├── prompts/    # Prompt testing
+│   │   └── shared/     # Shared/common components
+│   ├── hooks/          # Custom React hooks
+│   ├── lib/            # Utility functions
+│   ├── store/          # Redux state management
+│   ├── api/            # API client code
+│   ├── styles/         # Global styles
+│   └── pages/          # Page components
+└── public/             # Static assets
+```
+
+## Package: server
+
+The `packages/server` directory contains the Node.js backend:
+
+```
+server/
+├── src/
+│   ├── api/            # API routes
+│   ├── services/       # Business logic services
+│   ├── db/             # Database connections and models
+│   ├── middleware/     # Express middleware
+│   ├── utils/          # Utility functions
+│   └── types/          # TypeScript type definitions
+└── config/             # Server configuration
+```
+
+## Package: mcp-host
+
+The `packages/mcp-host` implements the MCP Host specification:
+
+```
+mcp-host/
+├── src/
+│   ├── host/           # MCP Host implementation
+│   ├── session/        # Session management
+│   ├── client-manager/ # Client connection management
+│   └── transport/      # Transport implementations
+└── tests/              # Unit and integration tests
+```
+
+## Package: mcp-client
+
+The `packages/mcp-client` implements the MCP Client specification:
+
+```
+mcp-client/
+├── src/
+│   ├── client/         # MCP Client implementation
+│   ├── connection/     # Server connection handling
+│   ├── protocol/       # Protocol message handling
+│   └── utils/          # Utility functions
+└── tests/              # Unit and integration tests
+```

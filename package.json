@@ -1,0 +1,52 @@
+{
+  "name": "plaiground",
+  "version": "0.1.0",
+  "description": "Immersive MCP Experimentation Studio",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "host": "tsx scripts/run-host.ts",
+    "dev-host": "tsx scripts/run-host.ts",
+    "monitor": "tsx scripts/monitor-server.ts",
+    "start": "concurrently \"pnpm dev-host\" \"pnpm monitor\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/felipepimentel/plaiground.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "developer-tools"
+  ],
+  "author": "Felipe Pimentel",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/felipepimentel/plaiground/issues"
+  },
+  "homepage": "https://github.com/felipepimentel/plaiground#readme",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "tsx": "^4.6.2",
+    "turbo": "^1.10.16",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "eventemitter3": "^5.0.1",
+    "express": "^4.18.2",
+    "uuid": "^9.0.0",
+    "vm2": "^3.9.19"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "pnpm@10.7.0+sha512.6b865ad4b62a1d9842b61d674a393903b871d9244954f652b8842c2b553c72176b278f64c463e52d40fff8aba385c235c8c9ecf5cc7de4fd78b8bb6d49633ab6"
+}

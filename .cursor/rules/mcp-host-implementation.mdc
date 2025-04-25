@@ -1,0 +1,74 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP Host Implementation
+
+## Architecture Overview
+
+The MCP Host is the core component that orchestrates communication between clients and servers. It:
+
+1. Creates and manages MCP Client instances
+2. Controls client connection permissions and lifecycle
+3. Enforces security policies and consent requirements
+4. Handles user authorization decisions
+5. Coordinates context aggregation across clients
+
+## Key Components
+
+### HostManager
+
+The `HostManager` serves as the central coordination point with these responsibilities:
+
+- Client lifecycle management (creation, termination)
+- Security policy enforcement
+- Configuration management
+- Event distribution
+
+### ClientRegistry
+
+The `ClientRegistry` maintains:
+
+- Registry of active client connections
+- Connection status tracking
+- Resource allocation and cleanup
+
+### SessionManager
+
+The `SessionManager` handles:
+
+- User session tracking
+- Authentication state
+- Permission grants
+- Connection history
+
+### CapabilityNegotiator
+
+The `CapabilityNegotiator` manages:
+
+- Server capability discovery
+- Feature compatibility checking
+- Protocol version negotiation
+
+## Implementation Guidelines
+
+1. **Security Boundaries**: 
+   - Each client should have strict isolation
+   - Explicit permission model for resource access
+   - Clear audit logging of all operations
+
+2. **Error Handling**:
+   - Graceful degradation when servers disconnect
+   - Comprehensive error reporting
+   - Reconnection strategies
+
+3. **Performance**:
+   - Efficient message routing
+   - Resource pooling where appropriate
+   - Minimal overhead for proxied communications
+
+4. **Extensibility**:
+   - Plugin architecture for custom capabilities
+   - Protocol version compatibility
+   - Feature detection and graceful fallbacks

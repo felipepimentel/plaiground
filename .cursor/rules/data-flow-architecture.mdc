@@ -1,0 +1,143 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Data Flow Architecture
+
+## High-Level Overview
+
+Plaiground's data flows through the system in a structured manner:
+
+```
+┌────────────┐    ┌────────────┐    ┌────────────┐    ┌────────────┐
+│            │    │            │    │            │    │            │
+│   React    │◄──►│  MCP Host  │◄──►│ MCP Client │◄──►│ MCP Server │
+│    UI      │    │            │    │            │    │            │
+└────────────┘    └────────────┘    └────────────┘    └────────────┘
+       ▲                 ▲                                   ▲
+       │                 │                                   │
+       ▼                 ▼                                   ▼
+┌────────────┐    ┌────────────┐                     ┌────────────┐
+│            │    │            │                     │            │
+│   State    │    │  Session   │                     │  External  │
+│  Management│    │   Store    │                     │  Resources │
+│            │    │            │                     │            │
+└────────────┘    └────────────┘                     └────────────┘
+```
+
+## Core Data Flows
+
+### UI to Server Flow
+
+1. **User Interaction** → React Component
+2. React Component → Action Creator
+3. Action Creator → Redux Action
+4. Redux Action → Redux Reducer
+5. Redux Reducer → State Update
+6. State Update → MCP Host Service
+7. MCP Host Service → MCP Client
+8. MCP Client → MCP Server
+9. MCP Server → Response
+10. Response → Redux State
+11. Redux State → UI Update
+
+### Server to UI Flow (Events/Notifications)
+
+1. **Server Event** → MCP Server Notification
+2. MCP Server Notification → MCP Client Event Handler
+3. MCP Client Event Handler → MCP Host Event Bus
+4. MCP Host Event Bus → Redux Action
+5. Redux Action → State Update
+6. State Update → UI Component Update
+
+### Resource Access Flow
+
+1. **Resource Request** → MCP Client Resource API
+2. MCP Client Resource API → MCP Server
+3. MCP Server → Resource Content
+4. Resource Content → Resource Cache
+5. Resource Cache → Component Props
+6. Component Props → UI Rendering
+
+## Key Data Transformations
+
+### Protocol Message Handling
+
+```
+Raw JSON-RPC → Transport Layer → Message Parser → Typed Message Object → 
+Business Logic → Response Object → Transport Layer → Raw JSON-RPC
+```
+
+### UI State Management
+
+```
+User Action → Action Creator → Action Object → Middleware → 
+Reducer → State Tree → Selector → Component Props → Rendered UI
+```
+
+### Resource Management
+
+```
+Resource URI → Resource Request → Raw Resource Data → 
+Parsed Resource → Cached Resource → UI Representation
+```
+
+## State Management
+
+### Global Application State
+
+Managed by Redux with these slices:
+
+- **connections**: Server connection status and metadata
+- **resources**: Resource cache and metadata
+- **tools**: Tool definitions and execution state
+- **prompts**: Prompt templates and execution history
+- **ui**: UI state (active panels, layouts, etc.)
+- **settings**: User preferences and configurations
+
+### Local Component State
+
+- Ephemeral UI state managed by React hooks
+- Form state managed by React Hook Form
+- Animation state managed by component-local hooks
+
+### Server Connection State
+
+- Connection status and reconnection logic
+- Authentication state
+- Capability negotiation results
+- Transport selection
+
+## Event Propagation
+
+Events flow through the system in this order:
+
+1. **DOM Events** → React event handlers
+2. **React Events** → Action creators
+3. **Redux Actions** → Middleware
+4. **Side Effects** → External systems
+5. **External Events** → Event listeners
+6. **Event Bus** → Subscribers
+7. **State Updates** → React components
+
+## Caching Strategy
+
+Data is cached at multiple levels:
+
+- **Resource Cache**: MCP resources with TTL and invalidation
+- **Redux Store**: Application state with selective persistence
+- **LocalStorage**: User preferences and session data
+- **Memory Cache**: Frequently accessed computed values
+- **Service Worker**: Static assets and offline support
+
+## Error Flow
+
+Errors propagate through the system:
+
+1. **Server Error** → MCP Client error handler
+2. **Client Error** → Error action
+3. **Error Action** → Error reducer
+4. **Error State** → Error boundary
+5. **Error Boundary** → Error UI
+6. **Error Logger** → Telemetry service
