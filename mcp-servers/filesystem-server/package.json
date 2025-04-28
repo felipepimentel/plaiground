@@ -1,0 +1,20 @@
+{
+    "name": "mcp-filesystem-server",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "main": "dist/server.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/server.js",
+        "dev": "tsc -w"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.10.0", // Match backend version
+        "zod": "^3.23.0" // For schema validation
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.0",
+        "typescript": "^5.3.3"
+    }
+}
