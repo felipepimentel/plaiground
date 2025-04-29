@@ -10,7 +10,7 @@
         "start": "node dist/main.js"
     },
     "dependencies": {
-        "@modelcontextprotocol/sdk": "latest",
+        "@modelcontextprotocol/sdk": "1.10.2",
         "express": "^4.18.2",
         "ws": "^8.16.0",
         "@mcp-lab/shared": "file:../../shared"

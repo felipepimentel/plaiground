@@ -4,6 +4,13 @@ import {
     ServerConnection
 } from '@mcp-lab/shared';
 
+// Define structure for server config entries from backend
+interface McpServerConfigEntry {
+    id: string;
+    name: string;
+    description?: string;
+}
+
 // Define types for state slices
 // export type ResourceState = Resource[];
 // export type ToolState = ToolDefinition[];
@@ -20,6 +27,7 @@ type AppState = {
     activeServerId: string | null;
     activeView: ActiveView;
     logs: string[];
+    configuredServers: McpServerConfigEntry[]; // Add state for configured servers
 };
 
 // --- App Actions --- 
@@ -33,6 +41,9 @@ type AppActions = {
 
     // View Management
     setActiveView: (view: ActiveView) => void;
+
+    // Configured Servers
+    setConfiguredServers: (servers: McpServerConfigEntry[]) => void; // Action to set servers
 
     // Data Loading (will update specific connection)
     // Types for ResourceState, ToolState, PromptState come from the imported ServerConnection type
@@ -55,17 +66,27 @@ export const useStore = create<AppState & AppActions>((set, get) => ({
     activeServerId: null,
     activeView: null,
     logs: [],
+    configuredServers: [], // Initialize configured servers state
 
     // Actions
     addConnection: (partialConn) => set((state) => {
-        if (state.connections.some(c => c.id === partialConn.id)) {
+        // Ensure the connection name matches the configName if available
+        const existingConn = state.connections.find(c => c.id === partialConn.id);
+        const updatedName = existingConn?.name || partialConn.name;
+        const finalConnData = { ...partialConn, name: updatedName };
+
+        if (existingConn) {
             return {
                 connections: state.connections.map(conn =>
-                    conn.id === partialConn.id ? { ...conn, ...partialConn } : conn
+                    conn.id === finalConnData.id ? { ...conn, ...finalConnData } : conn
                 )
             };
+        } else {
+            // When adding, check if a config name exists for this ID already in another property
+            // This part seems overly complex and potentially wrong - let's simplify.
+            // Just add the connection with the name provided.
+            return { connections: [...state.connections, { ...finalConnData }] };
         }
-        return { connections: [...state.connections, { ...partialConn }] };
     }),
 
     updateConnection: (id, updates) => set((state) => ({
@@ -86,10 +107,13 @@ export const useStore = create<AppState & AppActions>((set, get) => ({
 
     setActiveServer: (id) => set(() => ({
         activeServerId: id,
-        activeView: null
+        activeView: null // Reset view when changing server
     })),
 
     setActiveView: (view) => set({ activeView: view }),
+
+    // Action to set configured servers list
+    setConfiguredServers: (servers) => set({ configuredServers: servers }),
 
     setResources: (connectionId, resources) => {
         get().updateConnection(connectionId, { resources });
@@ -119,7 +143,9 @@ export const useStore = create<AppState & AppActions>((set, get) => ({
         const connection = get().connections.find(c => c.id === connectionId);
         if (connection) {
             const newMessage = { direction, timestamp: Date.now(), data };
-            const updatedMessages = [...(connection.rawWsMessages || []), newMessage];
+            // Limit stored messages per connection to avoid memory issues
+            const MAX_MESSAGES = 200;
+            const updatedMessages = [...(connection.rawWsMessages || []).slice(-MAX_MESSAGES + 1), newMessage];
             get().updateConnection(connectionId, { rawWsMessages: updatedMessages });
         } else {
             console.warn(`Received raw WS message for unknown connection ${connectionId}`);
@@ -127,5 +153,8 @@ export const useStore = create<AppState & AppActions>((set, get) => ({
         }
     },
 
-    addLog: (log) => set((state) => ({ logs: [...state.logs, `${new Date().toLocaleTimeString()}: ${log}`] })),
+    addLog: (log) => set((state) => ({
+        // Limit total logs displayed
+        logs: [...state.logs.slice(-500 + 1), `${new Date().toLocaleTimeString()}: ${log}`]
+    }))
 })); 

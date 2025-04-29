@@ -18,21 +18,23 @@ console.log(`[FS Server] Base directory set to: ${BASE_DIR}`);
 
 // Ensure the base directory exists
 async function ensureBaseDir() {
+    console.error('[FS Server] Attempting to ensure base directory...'); // Log start
     try {
         await fs.mkdir(BASE_DIR, { recursive: true });
-        console.log(`[FS Server] Ensured base directory exists: ${BASE_DIR}`);
+        console.error(`[FS Server] Ensured base directory exists: ${BASE_DIR}`); // Log success
     } catch (error) {
-        console.error(`[FS Server] FATAL: Could not create base directory ${BASE_DIR}:`, error);
+        console.error(`[FS Server] FATAL: Could not create/access base directory ${BASE_DIR}:`, error); // Log error
         process.exit(1); // Exit if we can't create the sandbox
     }
 }
 
 // Security helper: Resolves a user-provided path against BASE_DIR and prevents path traversal.
-function resolvePath(userPath: string): string {
-    const resolved = path.resolve(BASE_DIR, userPath);
-    // Check if the resolved path is still within the BASE_DIR
+function resolvePath(userPath: string | string[]): string {
+    // Join array segments if necessary
+    const pathString = Array.isArray(userPath) ? path.join(...userPath) : userPath;
+    const resolved = path.resolve(BASE_DIR, pathString);
     if (!resolved.startsWith(BASE_DIR)) {
-        throw new Error(`Access denied: Path is outside the allowed base directory. Attempted path: ${userPath}`);
+        throw new Error(`Access denied: Path is outside the allowed base directory. Attempted path: ${pathString}`);
     }
     return resolved;
 }
@@ -53,10 +55,12 @@ const server = new McpServer({
 // fs://list/{directoryPath} - Lists directory contents
 server.resource(
     "fsList",
-    new ResourceTemplate("fs://list/{+directoryPath}", { list: undefined }), // Use {+path} for multi-segment paths
+    new ResourceTemplate("fs://list/{+directoryPath}", { list: undefined }),
     async (uri, { directoryPath }) => {
         console.log(`[FS Server] Received fsList request for path: ${directoryPath}`);
-        const targetDir = resolvePath(directoryPath || '.'); // Default to base dir if no path
+        // Handle potential array path and default value
+        const effectivePath = directoryPath && (Array.isArray(directoryPath) ? directoryPath.length > 0 : true) ? directoryPath : '.';
+        const targetDir = resolvePath(effectivePath);
         console.log(`[FS Server] Resolved path to: ${targetDir}`);
         try {
             const entries = await fs.readdir(targetDir, { withFileTypes: true });
@@ -71,7 +75,7 @@ server.resource(
             console.error(`[FS Server] Error listing ${targetDir}:`, error);
             return {
                 contents: [{ uri: uri.href, text: `Error listing directory: ${error.message}` }],
-                isError: true // Indicate error state if needed by client
+                isError: true
             };
         }
     }
@@ -83,9 +87,10 @@ server.resource(
     new ResourceTemplate("fs://read/{+filePath}", { list: undefined }),
     async (uri, { filePath }) => {
         console.log(`[FS Server] Received fsRead request for path: ${filePath}`);
-        if (!filePath) {
+        if (!filePath || (Array.isArray(filePath) && filePath.length === 0)) {
             return { contents: [{ uri: uri.href, text: 'Error: File path is required.' }], isError: true };
         }
+        // Handle potential array path
         const targetFile = resolvePath(filePath);
         console.log(`[FS Server] Resolved path to: ${targetFile}`);
         try {
@@ -111,19 +116,23 @@ server.resource(
 
 // --- Tools --- 
 
+// Define types for validated arguments explicitly
+type WriteFileArgs = { filePath: string; content: string };
+type CreateDirectoryArgs = { directoryPath: string };
+
 // writeFile Tool
 server.tool(
     "writeFile",
     z.object({
         filePath: z.string().min(1, "File path is required."),
         content: z.string()
-    }),
-    async ({ filePath, content }) => {
+    }).shape,
+    async (args: WriteFileArgs, _extra: any) => {
+        const { filePath, content } = args;
         console.log(`[FS Server] Received writeFile request for path: ${filePath}`);
         const targetFile = resolvePath(filePath);
         console.log(`[FS Server] Resolved path to: ${targetFile}`);
         try {
-            // Ensure the directory exists before writing
             await fs.mkdir(path.dirname(targetFile), { recursive: true });
             await fs.writeFile(targetFile, content, 'utf-8');
             console.log(`[FS Server] Successfully wrote file: ${targetFile}`);
@@ -145,8 +154,9 @@ server.tool(
     "createDirectory",
     z.object({
         directoryPath: z.string().min(1, "Directory path is required.")
-    }),
-    async ({ directoryPath }) => {
+    }).shape,
+    async (args: CreateDirectoryArgs, _extra: any) => {
+        const { directoryPath } = args;
         console.log(`[FS Server] Received createDirectory request for path: ${directoryPath}`);
         const targetDir = resolvePath(directoryPath);
         console.log(`[FS Server] Resolved path to: ${targetDir}`);
@@ -169,14 +179,24 @@ server.tool(
 // --- Start Server --- 
 
 async function startServer() {
+    console.error('[FS Server] Running ensureBaseDir()...'); // Log before ensure
     await ensureBaseDir(); // Make sure sandbox exists before starting
+    console.error('[FS Server] ensureBaseDir() completed. Creating StdioServerTransport...'); // Log after ensure
     const transport = new StdioServerTransport();
-    console.log("[FS Server] Starting with StdioTransport...");
-    await server.connect(transport);
-    console.log("[FS Server] Connected and ready.");
+    console.error("[FS Server] StdioServerTransport created. Calling server.connect(transport)..."); // Log before connect
+    try {
+        await server.connect(transport);
+        console.error("[FS Server] server.connect(transport) completed successfully. Server is ready."); // Log after connect success
+
+    } catch (connectError) {
+        console.error("[FS Server] FATAL: Error during server.connect(transport):", connectError); // Log connect error
+        process.exit(1);
+    }
 }
 
+console.error('[FS Server] Script loaded. Calling startServer()...'); // Log script start
 startServer().catch(error => {
-    console.error("[FS Server] Failed to start:", error);
+    // This catch might be redundant if connect errors exit, but keep for safety
+    console.error("[FS Server] FATAL: Unhandled error during startup:", error);
     process.exit(1);
 }); 

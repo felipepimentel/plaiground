@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 // Use shared types
 import {
     PromptState,
@@ -13,44 +13,57 @@ import {
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStore } from './store';
 
-// --- Basic Components (will be refined and potentially moved) ---
+// --- Updated TopBar --- 
 
 function TopBar() {
     const { sendMessage } = useWebSocket();
-    const [command, setCommand] = useState('');
-    const [args, setArgs] = useState('');
+    const { configuredServers } = useStore(); // Get configured servers from store
+    const [selectedServerId, setSelectedServerId] = useState<string>('');
+
+    // Update selected server when the list changes (e.g., on initial load)
+    useEffect(() => {
+        if (configuredServers.length > 0 && !selectedServerId) {
+            setSelectedServerId(configuredServers[0].id);
+        }
+        // If the currently selected ID is no longer valid, reset
+        if (selectedServerId && !configuredServers.some(s => s.id === selectedServerId)) {
+            setSelectedServerId(configuredServers.length > 0 ? configuredServers[0].id : '');
+        }
+    }, [configuredServers, selectedServerId]);
 
     const handleConnect = () => {
-        if (!command.trim()) {
-            alert('Please enter a command.');
+        if (!selectedServerId) {
+            alert('Please select a server to connect.');
             return;
         }
-        // Basic arg splitting, might need refinement
-        const argsArray = args.split(' ').filter(Boolean);
-        sendMessage({ type: 'connectStdio', payload: { command: command.trim(), args: argsArray } });
-        setCommand('');
-        setArgs('');
+        console.log(`[Frontend] Sending connectConfigured for serverId: ${selectedServerId}`);
+        sendMessage({ type: 'connectConfigured', payload: { serverId: selectedServerId } });
     };
 
     return (
         <div style={styles.topBar}>
             <h1>MCP Exploration Lab</h1>
             <div style={styles.connectForm}>
-                <input
-                    type="text"
-                    placeholder="Server Command (e.g., node, python)"
-                    value={command}
-                    onChange={(e) => setCommand(e.target.value)}
-                    style={styles.input}
-                />
-                <input
-                    type="text"
-                    placeholder="Arguments (e.g., server.js)"
-                    value={args}
-                    onChange={(e) => setArgs(e.target.value)}
-                    style={styles.input}
-                />
-                <button onClick={handleConnect} style={styles.button}>Connect via Stdio</button>
+                <select
+                    value={selectedServerId}
+                    onChange={(e) => setSelectedServerId(e.target.value)}
+                    style={{ ...styles.input, minWidth: '250px' }} // Style the dropdown
+                    disabled={configuredServers.length === 0}
+                >
+                    {configuredServers.length === 0 && <option value="">Loading servers...</option>}
+                    {configuredServers.map(server => (
+                        <option key={server.id} value={server.id} title={server.description}>
+                            {server.name}
+                        </option>
+                    ))}
+                </select>
+                <button
+                    onClick={handleConnect}
+                    style={styles.button}
+                    disabled={!selectedServerId}
+                >
+                    Connect Server
+                </button>
             </div>
         </div>
     );
@@ -79,7 +92,7 @@ function ServerSelector() {
                         }}
                     >
                         <span>{conn.name} ({conn.status})</span>
-                        {conn.status !== 'disconnected' && conn.status !== 'connecting' && (
+                        {conn.status !== 'disconnected' && conn.status !== 'error' && (
                             <button
                                 onClick={(e) => handleDisconnect(conn.id, e)}
                                 style={styles.disconnectButton}
@@ -314,6 +327,33 @@ function PromptViewer({ connectionId, prompts, viewedMessagesInfo }: {
     const { sendMessage } = useWebSocket();
     const [selectedPrompt, setSelectedPrompt] = useState<SimplePromptDefinition | null>(null);
     const [promptArgs, setPromptArgs] = useState<{ [key: string]: any }>({});
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+    useEffect(() => {
+        // Reset error message when component remounts or prompts change
+        setErrorMessage(null);
+    }, [connectionId, prompts]);
+
+    // Check for the specific "Method not found" error
+    useEffect(() => {
+        if (prompts === undefined) {
+            const connections = useStore.getState().connections;
+            const connection = connections.find(c => c.id === connectionId);
+
+            // Check if we received a method not found error for this connection
+            if (connection && !connection.prompts) {
+                const logs = useStore.getState().logs;
+                const hasMethodNotFoundError = logs.some(log =>
+                    log.includes(`[MCP ${connectionId} Error`) &&
+                    log.includes('Method not found')
+                );
+
+                if (hasMethodNotFoundError) {
+                    setErrorMessage('This server does not support prompts.');
+                }
+            }
+        }
+    }, [connectionId, prompts]);
 
     const handlePromptSelect = (prompt: SimplePromptDefinition) => {
         setSelectedPrompt(prompt);
@@ -335,6 +375,11 @@ function PromptViewer({ connectionId, prompts, viewedMessagesInfo }: {
             }
         });
     };
+
+    // Display error if prompts API is not supported
+    if (errorMessage) {
+        return <p>{errorMessage}</p>;
+    }
 
     if (!prompts) return <p>Loading prompts or not available...</p>;
     if (prompts.length === 0) return <p>No prompts exposed by this server.</p>;
@@ -479,40 +524,109 @@ function MessageViewer({ messages }: {
 
 function MainContentArea() {
     const { activeServerId, activeView } = useStore();
-    const { sendMessage } = useWebSocket();
+    const { sendMessage, isConnected } = useWebSocket();
     const connections = useStore((state) => state.connections);
-    const activeConnection = connections.find(c => c.id === activeServerId);
+
+    // Memoize the active connection to prevent unnecessary re-renders
+    const activeConnection = useMemo(() =>
+        connections.find(c => c.id === activeServerId),
+        [connections, activeServerId]
+    );
+
+    // Track unsupported methods
+    const [unsupportedMethods, setUnsupportedMethods] = useState<Set<string>>(new Set());
+
+    // Reset unsupported methods when active server changes
+    useEffect(() => {
+        setUnsupportedMethods(new Set());
+    }, [activeServerId]);
+
+    // Monitor for method not found errors
+    useEffect(() => {
+        const logs = useStore.getState().logs;
+
+        // Check recent logs for method not found errors
+        if (activeConnection) {
+            const methodNotFoundErrors = logs
+                .filter(log => log.includes(`[MCP ${activeConnection.id} Error`) && log.includes('Method not found'))
+                .map(log => {
+                    // Extract operation name from log entry
+                    const match = log.match(/\boperation: "([^"]+)"/);
+                    const operation = match ? match[1] :
+                        log.match(/\(([^)]+)\)/) ? log.match(/\(([^)]+)\)/)[1] : null;
+                    return operation;
+                })
+                .filter(Boolean) as string[];
+
+            if (methodNotFoundErrors.length > 0) {
+                setUnsupportedMethods(prev => {
+                    const updated = new Set(prev);
+                    methodNotFoundErrors.forEach(method => updated.add(method));
+                    return updated;
+                });
+            }
+        }
+    }, [activeConnection, useStore.getState().logs]);
 
     // Fetch data when active server or view changes
     useEffect(() => {
-        if (activeConnection?.status === 'connected' && activeView) {
-            const connectionId = activeConnection.id;
-            switch (activeView) {
-                case 'Resources':
-                    // Fetch only if not already fetched or potentially stale
-                    if (activeConnection.resources === undefined) {
-                        sendMessage({ type: 'listResources', payload: { connectionId } });
-                    }
-                    break;
-                case 'Tools':
-                    if (activeConnection.tools === undefined) {
-                        sendMessage({ type: 'listTools', payload: { connectionId } });
-                    }
-                    break;
-                case 'Prompts':
-                    if (activeConnection.prompts === undefined) {
-                        sendMessage({ type: 'listPrompts', payload: { connectionId } });
-                    }
-                    break;
-                // Messages view doesn't require initial fetch
-            }
+        // Skip effect if no connection or not connected or WebSocket not connected
+        if (!activeConnection || activeConnection.status !== 'connected' || !activeView || !isConnected) {
+            return;
         }
-    }, [activeServerId, activeView, activeConnection, sendMessage]); // Re-run when these change
+
+        const connectionId = activeConnection.id;
+
+        // Track if we need to fetch data
+        let shouldFetch = false;
+        const methodName = `list${activeView}`; // e.g. listResources, listTools, listPrompts
+
+        // Don't attempt to fetch if method is known to be unsupported
+        if (unsupportedMethods.has(methodName)) {
+            console.log(`Skipping ${methodName} as it's known to be unsupported`);
+            return;
+        }
+
+        switch (activeView) {
+            case 'Resources':
+                // Fetch only if not already fetched
+                if (activeConnection.resources === undefined) {
+                    shouldFetch = true;
+                    sendMessage({ type: 'listResources', payload: { connectionId } });
+                }
+                break;
+            case 'Tools':
+                if (activeConnection.tools === undefined) {
+                    shouldFetch = true;
+                    sendMessage({ type: 'listTools', payload: { connectionId } });
+                }
+                break;
+            case 'Prompts':
+                if (activeConnection.prompts === undefined) {
+                    shouldFetch = true;
+                    sendMessage({ type: 'listPrompts', payload: { connectionId } });
+                }
+                break;
+            // Messages view doesn't require initial fetch
+        }
+
+        // Log fetch action if we're fetching
+        if (shouldFetch) {
+            console.log(`Fetching ${activeView} for ${connectionId}`);
+        }
+    }, [activeServerId, activeView, sendMessage, isConnected, unsupportedMethods]); // Include isConnected but not activeConnection
 
     const renderView = () => {
         if (!activeConnection || activeConnection.status !== 'connected') {
             return <p>Select a connected server to explore.</p>;
         }
+
+        // Check if current view method is unsupported
+        const methodName = `list${activeView}`; // e.g. listResources, listTools, listPrompts
+        if (unsupportedMethods.has(methodName)) {
+            return <p>This server does not support {activeView.toLowerCase()}.</p>;
+        }
+
         switch (activeView) {
             case 'Resources':
                 return <ResourceViewer
@@ -546,6 +660,8 @@ function MainContentArea() {
                 <h2 style={{ marginTop: 0 }}>Exploring: {activeConnection.name} ({activeConnection.status})</h2> :
                 <h2 style={{ marginTop: 0 }}>No Server Selected</h2>
             }
+            {!isConnected && activeConnection ?
+                <p style={{ color: 'red' }}>⚠️ WebSocket disconnected. Reconnecting...</p> : null}
             {renderView()}
         </div>
     );

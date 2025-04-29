@@ -1,0 +1,39 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP Exploration Lab - Project Overview
+
+This document outlines the structure and key components of the MCP Exploration Lab project.
+
+## 1. High-Level Goal
+
+The project aims to create an educational application demonstrating the Model Context Protocol (MCP). It consists of a central **Lab Backend** that connects to various **MCP Servers** and a **Lab Frontend** UI for interaction.
+
+## 2. Core Directories
+
+-   **`mcp-lab/`**: Contains the main lab application.
+    -   `frontend/`: React UI ([mcp-lab/frontend/src/App.tsx](mdc:mcp-lab/frontend/src/App.tsx)).
+    -   `backend/`: Node.js host application ([mcp-lab/backend/src/main.ts](mdc:mcp-lab/backend/src/main.ts)).
+-   **`mcp-servers/`**: Houses individual MCP server implementations.
+    -   `filesystem-server/`: Example server for file operations ([mcp-servers/filesystem-server/src/server.ts](mdc:mcp-servers/filesystem-server/src/server.ts)).
+-   **`shared/`**: Common TypeScript types ([shared/index.ts](mdc:shared/index.ts)) used by frontend and backend.
+-   **`docs/`**: Project documentation, including the specification ([docs/spec.md](mdc:docs/spec.md)).
+
+## 3. Key Files & Configuration
+
+-   **`mcp-servers.json`**: ([mcp-servers.json](mdc:mcp-servers.json)) Defines the MCP servers the lab can connect to (command, arguments, etc.). This is read by the Lab Backend.
+-   **`run.sh`**: ([run.sh](mdc:run.sh)) Script likely used for building and running the entire application stack (shared, servers, backend, frontend).
+
+## 4. Workflow & Communication
+
+1.  **Startup**: The `run.sh` script (or a similar command like `concurrently`) MUST be used to build all necessary packages (`shared`, `mcp-servers/*`, `mcp-lab/backend`) and then start the Lab Backend and Lab Frontend.
+2.  **Frontend <-> Backend**: The Frontend ([mcp-lab/frontend/src/App.tsx](mdc:mcp-lab/frontend/src/App.tsx)) connects via WebSocket (ws://localhost:8080) to the Backend ([mcp-lab/backend/src/main.ts](mdc:mcp-lab/backend/src/main.ts)). WebSocket messages handle UI actions (connect server, list resources, call tools) and data updates. The WebSocket hook is in [mcp-lab/frontend/src/hooks/useWebSocket.ts](mdc:mcp-lab/frontend/src/hooks/useWebSocket.ts), and state is managed by Zustand in [mcp-lab/frontend/src/store.ts](mdc:mcp-lab/frontend/src/store.ts).
+3.  **Backend <-> MCP Server**: The Backend reads `mcp-servers.json`. When the user selects a server in the Frontend, the Backend receives a request via WebSocket. It then launches the configured MCP server process (e.g., `node mcp-servers/filesystem-server/dist/server.js`) using `StdioClientTransport` from the `@modelcontextprotocol/sdk`. The Backend acts as an MCP client to the launched server, relaying requests/responses between the Frontend (via WebSocket) and the MCP Server (via stdio).
+4.  **Shared Types**: The `shared/` package ([shared/index.ts](mdc:shared/index.ts)) MUST define any data structures exchanged between the Frontend and Backend to ensure type safety. Both MUST import types from `@mcp-lab/shared`.
+
+## 5. Development Notes
+
+-   ALWAYS rebuild relevant packages (`shared`, `mcp-lab/backend`, `mcp-servers/*`) after making code changes before restarting the application.
+-   The Filesystem Server operates within a sandboxed directory: `mcp-servers/filesystem-server/sandbox/`.

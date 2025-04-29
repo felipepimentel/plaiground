@@ -4,8 +4,8 @@
     "name": "Filesystem Server (Node)",
     "command": "node",
     "args": [
-      "./mcp-servers/filesystem-server/dist/server.js"
+      "/home/pimentel/Workspace/plaiground/mcp-servers/filesystem-server/dist/server.js"
     ],
     "description": "Example server for accessing local files."
   }
-] 
+]
