@@ -1,3 +1,4 @@
+import { useSnackbar } from 'notistack';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 
@@ -9,8 +10,12 @@ console.log(`Frontend attempting WebSocket connection to: ${WS_URL}`);
 // Debounce timeout in milliseconds
 const DEBOUNCE_DELAY = 300;
 
+// Rate limiting configuration
+const RATE_LIMIT_DELAY = 5000; // 5 seconds between same requests
+const RATE_LIMIT_METHODS = ['tools/list', 'prompts/list', 'resources/list']; // Methods to rate limit
+
 // Message types that should be debounced
-const DEBOUNCE_MESSAGES = ['resourcesList', 'toolsList', 'promptsList'];
+const DEBOUNCE_MESSAGES = ['resourcesList', 'promptsList'];
 
 // Reconnection delay in milliseconds
 const RECONNECT_DELAY_MS = 5000; // Increased delay
@@ -21,6 +26,14 @@ export function useWebSocket() {
     const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
     const pendingMessagesRef = useRef<Map<string, { timer: NodeJS.Timeout, data: string }>>(new Map());
     const [isConnected, setIsConnected] = useState(false);
+    const activeServerId = useStore(state => state.activeServerId);
+    const { enqueueSnackbar } = useSnackbar();
+
+    // Rate limiting: track last request time for each rate-limited endpoint
+    const lastRequestTimeRef = useRef<Map<string, number>>(new Map());
+
+    // Add a message queue for messages that need to be sent when connection is established
+    const messageQueueRef = useRef<object[]>([]);
 
     const {
         addConnection,
@@ -40,18 +53,139 @@ export function useWebSocket() {
 
     // --- Define sendMessage FIRST (without useCallback) ---
     const sendMessage = (message: object) => {
-        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            try {
-                const messageString = JSON.stringify(message);
-                ws.current.send(messageString);
-            } catch (error) {
-                console.error('Failed to send message:', error);
-                addLog(`[System] Failed to send message: ${error}`);
-            }
-        } else {
-            console.warn('WebSocket not connected. Cannot send message:', message);
+        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+            console.log('[WebSocket] Connection not ready, queuing message for later');
+            // Queue the message to be sent once connected
+            messageQueueRef.current.push(message);
+            return;
         }
-    }; // No useCallback wrapper
+
+        try {
+            let mcpMessage = message;
+
+            // If the message doesn't have jsonrpc field, add it (standardize to JSON-RPC 2.0)
+            // @ts-ignore
+            if (!message.jsonrpc) {
+                // @ts-ignore
+                const type = message.type;
+                // @ts-ignore
+                const payload = message.payload;
+
+                // Convert our internal message format to MCP JSON-RPC 2.0 format
+                if (type === 'getTools') {
+                    mcpMessage = {
+                        jsonrpc: '2.0',
+                        id: Math.floor(Math.random() * 10000),
+                        method: "tools/list",
+                        params: {
+                            connectionId: payload?.connectionId
+                        }
+                    };
+                }
+                else if (type === 'getPrompts') {
+                    mcpMessage = {
+                        jsonrpc: '2.0',
+                        id: Math.floor(Math.random() * 10000),
+                        method: "prompts/list",
+                        params: {
+                            connectionId: payload?.connectionId
+                        }
+                    };
+                }
+                else if (type === 'executeTool') {
+                    mcpMessage = {
+                        jsonrpc: '2.0',
+                        id: Math.floor(Math.random() * 10000),
+                        method: "tools/call",
+                        params: {
+                            connectionId: payload.connectionId,
+                            name: payload.toolName,
+                            arguments: payload.parameters || {}
+                        }
+                    };
+                }
+                else if (type === 'getResources') {
+                    mcpMessage = {
+                        jsonrpc: '2.0',
+                        id: Math.floor(Math.random() * 10000),
+                        method: "resources/list",
+                        params: {
+                            connectionId: payload.connectionId
+                        }
+                    };
+                }
+                else if (type === 'connectConfigured') {
+                    // Special case for connecting to servers - ensure serverName is preserved
+                    mcpMessage = {
+                        jsonrpc: '2.0',
+                        id: Math.floor(Math.random() * 10000),
+                        method: "connectConfigured",
+                        params: {
+                            serverName: payload.serverName
+                        }
+                    };
+                }
+                // Handle any other internal message types by converting to JSON-RPC 2.0
+                else if (type && payload) {
+                    console.warn('[WebSocket] Converting unknown message type to JSON-RPC format:', type);
+                    // For other message types, try to map to MCP method patterns
+                    let method = type;
+                    // Map common prefixes
+                    if (type.startsWith('get')) {
+                        // e.g., getTools → tools/list
+                        const resource = type.substring(3).toLowerCase();
+                        method = `${resource}/list`;
+                    } else if (type.startsWith('execute')) {
+                        // e.g., executeTool → tools/call
+                        const resource = type.substring(7).toLowerCase();
+                        method = `${resource}/call`;
+                    }
+
+                    mcpMessage = {
+                        jsonrpc: '2.0',
+                        id: Math.floor(Math.random() * 10000),
+                        method,
+                        params: payload
+                    };
+                }
+                // If message already has an id and method, just add jsonrpc field
+                // @ts-ignore
+                else if (message.id !== undefined && message.method) {
+                    mcpMessage = {
+                        ...message,
+                        jsonrpc: '2.0'
+                    };
+                }
+
+                console.log('[WebSocket] Converted internal message to MCP format:', mcpMessage);
+            }
+
+            // Apply rate limiting for specific methods
+            // @ts-ignore
+            const method = mcpMessage.method;
+            if (method && RATE_LIMIT_METHODS.includes(method)) {
+                const now = Date.now();
+                const lastRequestTime = lastRequestTimeRef.current.get(method) || 0;
+
+                if (now - lastRequestTime < RATE_LIMIT_DELAY) {
+                    console.log(`[WebSocket] Rate limiting request for method ${method} - too frequent`);
+                    return; // Skip sending if too frequent
+                }
+
+                // Update last request time
+                lastRequestTimeRef.current.set(method, now);
+            }
+
+            const messageString = JSON.stringify(mcpMessage);
+            ws.current.send(messageString);
+
+            // Log the message (for debugging)
+            addRawWsMessage('global', 'send', messageString);
+        } catch (error) {
+            console.error('[WebSocket] Failed to send message:', error);
+            enqueueSnackbar('Error sending message to server.', { variant: 'error' });
+        }
+    };
 
     // Debounce function to prevent too many state updates
     const debounceMessage = useCallback((key: string, data: string, callback: (data: string) => void) => {
@@ -79,26 +213,139 @@ export function useWebSocket() {
     const processMessage = useCallback((rawData: string) => {
         try {
             const message = JSON.parse(rawData);
-            const { type, payload } = message;
+            console.log('[WebSocket] Raw received message:', message);
 
-            // Check if this message type should be debounced
-            const shouldDebounce = DEBOUNCE_MESSAGES.includes(type);
-            const messageKey = shouldDebounce ? `${type}-${payload?.connectionId || 'global'}` : null;
+            // MCP standard message format detection
+            // Check if this is a JSON-RPC 2.0 style message
+            if (message.jsonrpc === '2.0' || message.id !== undefined) {
+                console.log('[WebSocket] Detected standard MCP format message');
 
-            // For debounced messages, handle differently 
-            if (shouldDebounce && messageKey) {
-                debounceMessage(messageKey, rawData, (data) => {
-                    // This callback will run after the debounce delay
-                    const debouncedMessage = JSON.parse(data);
-                    handleProcessedMessage(debouncedMessage.type, debouncedMessage.payload);
-                });
-                return;
+                // 1. Handle method responses (has id field)
+                if (message.id !== undefined) {
+                    // 1a. Success response (has result field)
+                    if (message.result !== undefined) {
+                        console.log('[WebSocket] Processing MCP success response for id:', message.id);
+
+                        // Handle known tool-related responses
+                        if (message.result.tools !== undefined) {
+                            const connectionId = message.params?.connectionId || activeServerId;
+                            if (connectionId) {
+                                const transformedMessage = {
+                                    type: 'toolsList',
+                                    payload: {
+                                        connectionId,
+                                        data: {
+                                            tools: message.result.tools
+                                        }
+                                    }
+                                };
+                                console.log('[WebSocket] Transformed tools response:', transformedMessage);
+                                handleProcessedMessage(transformedMessage.type, transformedMessage.payload);
+                                return;
+                            }
+                        }
+
+                        // Handle known prompt-related responses
+                        if (message.result.prompts !== undefined) {
+                            const connectionId = message.params?.connectionId || activeServerId;
+                            if (connectionId) {
+                                const transformedMessage = {
+                                    type: 'promptsList',
+                                    payload: {
+                                        connectionId,
+                                        data: {
+                                            prompts: message.result.prompts
+                                        }
+                                    }
+                                };
+                                console.log('[WebSocket] Transformed prompts response:', transformedMessage);
+                                handleProcessedMessage(transformedMessage.type, transformedMessage.payload);
+                                return;
+                            }
+                        }
+                    }
+
+                    // 1b. Error response (has error field)
+                    if (message.error !== undefined) {
+                        console.error('[WebSocket] MCP error response:', message.error);
+                        addLog(`[MCP Error] ${message.error.message || 'Unknown error'}`);
+                        return;
+                    }
+                }
+
+                // 2. Handle MCP notifications (no id field but has method)
+                if (message.id === undefined && message.method) {
+                    console.log('[WebSocket] Processing MCP notification:', message.method);
+
+                    // Handle list_changed notifications
+                    if (message.method === 'notifications/tools/list_changed') {
+                        // Trigger a tools refresh for the active server
+                        if (activeServerId) {
+                            console.log('[WebSocket] Tools list changed, refreshing');
+                            const refreshMessage = {
+                                id: Math.floor(Math.random() * 10000),
+                                jsonrpc: '2.0',
+                                method: 'tools/list',
+                                params: {}
+                            };
+                            try {
+                                ws.current?.send(JSON.stringify(refreshMessage));
+                            } catch (err) {
+                                console.error('Failed to request tools refresh:', err);
+                            }
+                        }
+                        return;
+                    }
+
+                    if (message.method === 'notifications/prompts/list_changed') {
+                        // Similar handling for prompts refresh
+                        if (activeServerId) {
+                            console.log('[WebSocket] Prompts list changed, refreshing');
+                            const refreshMessage = {
+                                id: Math.floor(Math.random() * 10000),
+                                jsonrpc: '2.0',
+                                method: 'prompts/list',
+                                params: {}
+                            };
+                            try {
+                                ws.current?.send(JSON.stringify(refreshMessage));
+                            } catch (err) {
+                                console.error('Failed to request prompts refresh:', err);
+                            }
+                        }
+                        return;
+                    }
+                }
             }
 
-            // For non-debounced messages, process immediately
-            handleProcessedMessage(type, payload);
+            // Process our internal message format (fallback)
+            if (message.type && message.payload) {
+                const { type, payload } = message;
+
+                // Debug incoming toolsList messages
+                if (type === 'toolsList') {
+                    console.log('[WebSocket] Received toolsList message:', payload);
+                }
+
+                // Check if this message type should be debounced
+                const shouldDebounce = DEBOUNCE_MESSAGES.includes(type);
+                const messageKey = shouldDebounce ? `${type}-${payload?.connectionId || 'global'}` : null;
+
+                // For debounced messages, handle differently 
+                if (shouldDebounce && messageKey) {
+                    debounceMessage(messageKey, rawData, (data) => {
+                        // This callback will run after the debounce delay
+                        const debouncedMessage = JSON.parse(data);
+                        handleProcessedMessage(debouncedMessage.type, debouncedMessage.payload);
+                    });
+                    return;
+                }
+
+                // For non-debounced messages, process immediately
+                handleProcessedMessage(type, payload);
+            }
         } catch (error) {
-            console.error('Failed to parse or handle message from backend:', error);
+            console.error('Failed to parse or handle message from backend:', error, 'Raw data:', rawData);
             addLog(`[WS RECV Malformed]: ${rawData}`);
         }
     }, [addLog, debounceMessage, handleProcessedMessage]);
@@ -126,6 +373,10 @@ export function useWebSocket() {
             setIsConnected(true);
             // Request configured servers on connect
             sendMessage({ type: 'getConfiguredServers', payload: {} });
+
+            // Send all queued messages
+            messageQueueRef.current.forEach((message) => sendMessage(message));
+            messageQueueRef.current.length = 0;
         };
 
         ws.current.onclose = () => {

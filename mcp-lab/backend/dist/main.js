@@ -23,6 +23,8 @@ const CONFIG_FILE_PATH = path.resolve(__dirname, '../../../mcp-lab-config.json')
 console.log(`Looking for server config at: ${CONFIG_FILE_PATH}`); // Log the path
 // Use a Map for easier lookup by server name
 let configuredServers = new Map();
+// Rate limiting for list requests
+const listRequestRateLimits = new Map();
 function loadServerConfigs() {
     console.log(`Attempting to load server configs from: ${CONFIG_FILE_PATH}`);
     try {
@@ -99,8 +101,68 @@ function startWebSocketServer() {
                 sendWsMessage(ws, 'rawLog', { direction: 'recv', data: rawMessage });
                 try {
                     const data = JSON.parse(rawMessage);
-                    console.log('Received message from frontend:', data);
-                    // --- NEW: Handle request for config list ---
+                    // Handle standard MCP JSON-RPC 2.0 messages
+                    if (data.jsonrpc === '2.0' && data.method) {
+                        // Handle tools/list request (direct MCP format)
+                        if (data.method === 'tools/list') {
+                            // Find the active connection ID from the activeServerId
+                            const connectionId = data.params?.connectionId ||
+                                Array.from(activeConnections.values()).find(conn => conn.websocket === ws && conn.status === 'connected')?.id;
+                            if (connectionId) {
+                                await handleListRequest(ws, connectionId, 'listTools', 'toolsList');
+                                // Send a proper JSON-RPC 2.0 response
+                                const response = {
+                                    jsonrpc: '2.0',
+                                    id: data.id,
+                                    result: { success: true }
+                                };
+                                ws.send(JSON.stringify(response));
+                            }
+                            else {
+                                console.error('[Backend] No active connection found for tools/list request');
+                                const error = {
+                                    jsonrpc: '2.0',
+                                    id: data.id,
+                                    error: {
+                                        code: -32000,
+                                        message: 'No active connection found'
+                                    }
+                                };
+                                ws.send(JSON.stringify(error));
+                            }
+                            return;
+                        }
+                        // Handle connectConfigured method with JSON-RPC 2.0 format
+                        else if (data.method === 'connectConfigured') {
+                            console.log('[Backend] Received JSON-RPC connectConfigured request:', data);
+                            const serverName = data.params?.serverName;
+                            if (typeof serverName === 'string') {
+                                await handleConnectConfigured(ws, serverName);
+                                // Send a proper JSON-RPC 2.0 response
+                                const response = {
+                                    jsonrpc: '2.0',
+                                    id: data.id,
+                                    result: { success: true }
+                                };
+                                ws.send(JSON.stringify(response));
+                            }
+                            else {
+                                console.error('[Backend] Missing serverName in connectConfigured params');
+                                const error = {
+                                    jsonrpc: '2.0',
+                                    id: data.id,
+                                    error: {
+                                        code: -32000,
+                                        message: 'Missing serverName parameter'
+                                    }
+                                };
+                                ws.send(JSON.stringify(error));
+                            }
+                            return;
+                        }
+                        // Add handlers for other MCP methods as needed
+                    }
+                    // --- Handle our legacy internal message types ---
                     if (data.type === 'getConfiguredServers') {
                         sendConfiguredServersList(ws);
                     }
@@ -122,9 +184,6 @@ function startWebSocketServer() {
                     }
                     else if (data.type === 'listResources') {
                         await handleListRequest(ws, data.payload?.connectionId, 'listResources', 'resourcesList');
-                    }
-                    else if (data.type === 'listTools') {
-                        await handleListRequest(ws, data.payload?.connectionId, 'listTools', 'toolsList');
                     }
                     else if (data.type === 'listPrompts') {
                         await handleListRequest(ws, data.payload?.connectionId, 'listPrompts', 'promptsList');
@@ -193,8 +252,6 @@ function startWebSocketServer() {
 }
 // Start the WebSocket server (will exit if port is busy)
 const wss = startWebSocketServer();
-// Add this at the top of the file with other imports and declarations
-const listRequestRateLimits = new Map();
 // --- NEW: Helper function to send the configured server list ---
 function sendConfiguredServersList(ws) {
     const serverList = Array.from(configuredServers.values());

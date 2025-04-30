@@ -24,6 +24,24 @@
             "type": "websocket",
             "url": "ws://localhost:8081",
             "description": "Another example server (WebSocket)."
+        },
+        "OfficialCalculator": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "@modelcontextprotocol/example-calculator@latest",
+                "--stdio"
+            ],
+            "description": "Official MCP Calculator Example Server"
+        },
+        "Git": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "@cyanheads/git-mcp-server",
+                "--stdio"
+            ],
+            "description": "Git MCP Server"
         }
     }
 }

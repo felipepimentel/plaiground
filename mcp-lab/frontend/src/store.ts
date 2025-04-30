@@ -256,12 +256,13 @@ export const useStore = create<AppState & AppActions>((set, get) => {
             get().addLog(`[Connection ${connectionId}] Received Resources list.`);
         },
         setTools: (connectionId, tools) => {
+            console.log(`[Store] Setting tools for ${connectionId}:`, tools);
             set((state) => ({
                 connections: state.connections.map(c =>
                     c.id === connectionId ? { ...c, tools: tools } : c
                 )
             }));
-            get().addLog(`[Connection ${connectionId}] Received Tools list.`);
+            get().addLog(`[Connection ${connectionId}] Received Tools list: ${tools ? tools.length : 'none'} tools available.`);
         },
         setPrompts: (connectionId, prompts) => {
             set((state) => ({
