@@ -1,5 +1,24 @@
 // Shared types between frontend and backend
 
+// --- Configuration Type ---
+/**
+ * Represents the definition of a configured MCP server,
+ * typically loaded from a configuration file.
+ */
+export interface McpServerDefinition {
+    name: string;
+    type: 'stdio' | 'websocket';
+    description?: string;
+    // Stdio specific
+    command?: string;
+    args?: string[];
+    cwd?: string;
+    // Websocket specific
+    url?: string;
+}
+
+// --- MCP Primitive Types ---
+
 export interface SimpleResource {
     uri: string;
     name?: string;

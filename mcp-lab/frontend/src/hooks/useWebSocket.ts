@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 
-// Dynamically try different ports if the primary one fails
-const WS_BASE_URL = 'ws://localhost';
-const WS_PORTS = [8080, 8081, 8082, 8083, 8084, 8085];
+// Get port from environment variable set by Vite
+const WS_PORT = import.meta.env.VITE_WS_PORT || '8080'; // Default if not set
+const WS_URL = `ws://localhost:${WS_PORT}`;
+console.log(`Frontend attempting WebSocket connection to: ${WS_URL}`);
 
 // Debounce timeout in milliseconds
 const DEBOUNCE_DELAY = 300;
@@ -11,15 +12,14 @@ const DEBOUNCE_DELAY = 300;
 // Message types that should be debounced
 const DEBOUNCE_MESSAGES = ['resourcesList', 'toolsList', 'promptsList'];
 
-// Reconnection delays (in ms) with exponential backoff
-const RECONNECT_DELAYS = [1000, 2000, 3000, 5000, 8000];
+// Reconnection delay in milliseconds
+const RECONNECT_DELAY_MS = 5000; // Increased delay
+const INITIAL_CONNECT_DELAY_MS = 500; // New: Delay before first attempt
 
 export function useWebSocket() {
     const ws = useRef<WebSocket | null>(null);
-    const portIndexRef = useRef<number>(0);
     const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
     const pendingMessagesRef = useRef<Map<string, { timer: NodeJS.Timeout, data: string }>>(new Map());
-    const reconnectAttemptsRef = useRef<number>(0);
     const [isConnected, setIsConnected] = useState(false);
 
     const {
@@ -34,20 +34,24 @@ export function useWebSocket() {
         setLastToolResult,
         setPromptMessages,
         addRawWsMessage,
-        setConfiguredServers
+        setConfiguredServers,
+        handleWsMessage
     } = useStore();
 
-    const getNextWsUrl = useCallback(() => {
-        const port = WS_PORTS[portIndexRef.current];
-        return `${WS_BASE_URL}:${port}`;
-    }, []);
-
-    // Get reconnect delay with exponential backoff
-    const getReconnectDelay = useCallback(() => {
-        const attempt = reconnectAttemptsRef.current;
-        const delayIndex = Math.min(attempt, RECONNECT_DELAYS.length - 1);
-        return RECONNECT_DELAYS[delayIndex];
-    }, []);
+    // --- Define sendMessage FIRST (without useCallback) ---
+    const sendMessage = (message: object) => {
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            try {
+                const messageString = JSON.stringify(message);
+                ws.current.send(messageString);
+            } catch (error) {
+                console.error('Failed to send message:', error);
+                addLog(`[System] Failed to send message: ${error}`);
+            }
+        } else {
+            console.warn('WebSocket not connected. Cannot send message:', message);
+        }
+    }; // No useCallback wrapper
 
     // Debounce function to prevent too many state updates
     const debounceMessage = useCallback((key: string, data: string, callback: (data: string) => void) => {
@@ -65,6 +69,12 @@ export function useWebSocket() {
         // Store the timer and data
         pendingMessagesRef.current.set(key, { timer, data });
     }, []);
+
+    // Extracted message handling logic to a separate function
+    const handleProcessedMessage = useCallback((type: string, payload: any) => {
+        // Use the central handler from the store
+        handleWsMessage({ type, payload });
+    }, [handleWsMessage]); // Depend on the store's handler
 
     const processMessage = useCallback((rawData: string) => {
         try {
@@ -91,272 +101,77 @@ export function useWebSocket() {
             console.error('Failed to parse or handle message from backend:', error);
             addLog(`[WS RECV Malformed]: ${rawData}`);
         }
-    }, [addLog, debounceMessage]);
-
-    // Extracted message handling logic to a separate function
-    const handleProcessedMessage = useCallback((type: string, payload: any) => {
-        // --- Handle Raw Log Message FIRST --- 
-        if (type === 'rawLog') {
-            let associatedConnectionId = payload?.connectionId ||
-                payload?.data?.id;
-
-            if (!associatedConnectionId && typeof payload.data === 'string') {
-                try {
-                    const parsedRawData = JSON.parse(payload.data);
-                    associatedConnectionId = parsedRawData?.params?.connectionId ||
-                        parsedRawData?.result?.connectionId ||
-                        parsedRawData?.payload?.connectionId;
-                } catch { /* ignore parse error */ }
-            }
-
-            if (associatedConnectionId) {
-                // Don't log raw messages for now - they're causing too many updates
-                // addRawWsMessage(associatedConnectionId, payload.direction, payload.data);
-            } else {
-                addLog(`[${payload.direction === 'send' ? 'WS SEND' : 'WS RECV'}] ${payload.data}`);
-            }
-            return;
-        }
-
-        // --- Handle Other Message Types --- 
-        switch (type) {
-            case 'configuredServersList':
-                setConfiguredServers(payload.servers);
-                addLog(`[Config] Received ${payload.servers.length} configured servers.`);
-                break;
-            case 'connectionStatus':
-                const { id, name, status, serverInfo, capabilities, error, reason } = payload;
-
-                // First check if the connection exists
-                const existing = useStore.getState().connections.find(c => c.id === id);
-
-                if (!existing && status !== 'disconnected') {
-                    // Only add connection if it doesn't exist and isn't being disconnected
-                    addConnection({ id, name, status });
-                }
-
-                // Only update if not disconnecting
-                if (status !== 'disconnected') {
-                    updateConnection(id, {
-                        name,
-                        status,
-                        ...(serverInfo && { serverInfo }),
-                        ...(capabilities && { capabilities }),
-                    });
-                }
-
-                // Handle specific status messages
-                if (status === 'disconnected') {
-                    addLog(`[MCP ${id}] Disconnected. ${reason ? `Reason: ${reason}` : ''}`);
-                    removeConnection(id);
-                } else if (status === 'error') {
-                    addLog(`[MCP ${id}] Connection Error: ${error}`);
-                } else if (status === 'connected') {
-                    addLog(`[MCP ${id}] Connected to ${serverInfo?.name} v${serverInfo?.version}.`);
-                }
-                break;
-
-            case 'mcpLog':
-                addLog(`[MCP ${payload.connectionId} Log - ${payload.level}]: ${payload.message}`);
-                break;
-            case 'mcpError':
-                addLog(`[MCP ${payload.connectionId} Error${payload.operation ? ` (${payload.operation})` : ''}]: ${JSON.stringify(payload.error)}`);
-                if (!payload.operation) {
-                    updateConnection(payload.connectionId, { status: 'error' });
-                }
-                break;
-            case 'error':
-                addLog(`[Backend Error]: ${payload.message}`);
-                break;
-
-            // --- Handle List Responses ---
-            case 'resourcesList':
-                setResources(payload.connectionId, payload.data.resources);
-                addLog(`[MCP ${payload.connectionId}] Received ${payload.data.resources?.length || 0} resources.`);
-                break;
-            case 'toolsList':
-                setTools(payload.connectionId, payload.data.tools);
-                addLog(`[MCP ${payload.connectionId}] Received ${payload.data.tools?.length || 0} tools.`);
-                break;
-            case 'promptsList':
-                setPrompts(payload.connectionId, payload.data.prompts);
-                addLog(`[MCP ${payload.connectionId}] Received ${payload.data.prompts?.length || 0} prompts.`);
-                break;
-
-            // --- Handle Detail Responses ---
-            case 'resourceContent':
-                setViewedResourceContent(
-                    payload.connectionId,
-                    payload.uri,
-                    payload.content,
-                    payload.error
-                );
-                addLog(`[MCP ${payload.connectionId}] Received content for resource: ${payload.uri}${payload.error ? ' (Error)' : ''}`);
-                break;
-            case 'toolResult':
-                setLastToolResult(
-                    payload.connectionId,
-                    payload.toolName,
-                    payload.result,
-                    payload.error
-                );
-                addLog(`[MCP ${payload.connectionId}] Received result for tool: ${payload.toolName}${payload.error ? ' (Error)' : ''}`);
-                break;
-            case 'promptMessages':
-                setPromptMessages(
-                    payload.connectionId,
-                    payload.promptName,
-                    payload.messages,
-                    payload.error
-                );
-                addLog(`[MCP ${payload.connectionId}] Received messages for prompt: ${payload.promptName}${payload.error ? ' (Error)' : ''}`);
-                break;
-
-            default:
-                console.warn('Unknown message type from backend:', type);
-                addLog(`[WS RECV Unknown]: ${JSON.stringify(payload)}`);
-        }
-    }, [
-        addConnection, updateConnection, removeConnection, addLog,
-        setResources, setTools, setPrompts,
-        setViewedResourceContent, setLastToolResult, setPromptMessages,
-        setConfiguredServers
-    ]);
+    }, [addLog, debounceMessage, handleProcessedMessage]);
 
     const connectWebSocket = useCallback(() => {
-        // Don't try to connect if we're already connected
-        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            console.log('WebSocket already connected.');
-            return;
-        }
-
-        // Clear any pending reconnect timer
+        // Clear any pending reconnect timer first
         if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
         }
 
-        const wsUrl = getNextWsUrl();
-        console.log(`Connecting to WebSocket at ${wsUrl}...`);
-
-        // Create new WebSocket connection
-        try {
-            const socket = new WebSocket(wsUrl);
-            ws.current = socket;
-
-            socket.onopen = () => {
-                console.log(`WebSocket Connected to Backend on port ${WS_PORTS[portIndexRef.current]}`);
-                addLog(`[WS] Connected to backend on port ${WS_PORTS[portIndexRef.current]}.`);
-
-                // Reset connection state
-                setIsConnected(true);
-                reconnectAttemptsRef.current = 0;
-
-                // Always reset to first port on successful connection
-                portIndexRef.current = 0;
-            };
-
-            socket.onclose = (event) => {
-                console.log('WebSocket Disconnected from Backend', event.code, event.reason);
-                setIsConnected(false);
-
-                const wasClean = event.wasClean;
-                addLog(`[WS] Disconnected from backend${wasClean ? ' (clean)' : ''}. Attempting to reconnect...`);
-
-                ws.current = null;
-
-                // Increment the attempt counter for exponential backoff
-                reconnectAttemptsRef.current++;
-
-                // Move to next port only if this wasn't a clean close
-                if (!wasClean) {
-                    portIndexRef.current = (portIndexRef.current + 1) % WS_PORTS.length;
-                }
-
-                // Schedule reconnect with backoff
-                const delay = getReconnectDelay();
-                addLog(`[WS] Will try reconnect in ${delay / 1000} seconds...`);
-                reconnectTimerRef.current = setTimeout(connectWebSocket, delay);
-            };
-
-            socket.onerror = (error) => {
-                console.error('WebSocket Error:', error);
-                addLog(`[WS] Error connecting to port ${WS_PORTS[portIndexRef.current]}`);
-
-                // Errors are followed by close events, no need to close manually
-                // The close handler will handle reconnection logic
-            };
-
-            socket.onmessage = (event) => {
-                processMessage(event.data);
-            };
-        } catch (err) {
-            console.error('Error creating WebSocket:', err);
-            addLog(`[WS] Error creating WebSocket: ${err}`);
-
-            // Move to next port
-            portIndexRef.current = (portIndexRef.current + 1) % WS_PORTS.length;
-
-            // Schedule reconnect with backoff
-            const delay = getReconnectDelay();
-            reconnectTimerRef.current = setTimeout(connectWebSocket, delay);
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            console.log('WebSocket already connected.');
+            return; // Already connected
         }
-    }, [addLog, getNextWsUrl, processMessage, getReconnectDelay]);
+
+        // Use the fixed WS_URL derived from env var
+        console.log(`Attempting WebSocket connection to ${WS_URL}...`);
+        addLog(`[System] Connecting WebSocket to ${WS_URL}...`);
+        ws.current = new WebSocket(WS_URL);
+
+        ws.current.onopen = () => {
+            console.log(`WebSocket connected to ${WS_URL}`);
+            addLog(`[System] WebSocket connected to ${WS_URL}.`);
+            setIsConnected(true);
+            // Request configured servers on connect
+            sendMessage({ type: 'getConfiguredServers', payload: {} });
+        };
+
+        ws.current.onclose = () => {
+            console.log(`WebSocket disconnected from ${WS_URL}`);
+            addLog(`[System] WebSocket disconnected. Attempting reconnect in ${RECONNECT_DELAY_MS / 1000}s...`);
+            setIsConnected(false);
+            ws.current = null; // Clear the ref
+
+            // Attempt to reconnect after a simple fixed delay
+            if (!reconnectTimerRef.current) {
+                reconnectTimerRef.current = setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
+            }
+        };
+
+        ws.current.onerror = (error) => {
+            console.error(`WebSocket error connecting to ${WS_URL}:`, error);
+            addLog(`[System] WebSocket error on ${WS_URL}: ${error.type}`);
+            // onclose will be called after onerror, triggering the reconnect logic.
+        };
+
+        ws.current.onmessage = (event) => {
+            processMessage(event.data);
+        };
+    }, [addLog, processMessage, sendMessage, handleProcessedMessage]); // Simplified dependencies
 
     useEffect(() => {
         console.log("useWebSocket Mounting...");
-
-        // Connect to WebSocket on mount
-        connectWebSocket();
+        // Delay the initial connection attempt
+        const initialConnectTimeout = setTimeout(() => {
+            connectWebSocket();
+        }, INITIAL_CONNECT_DELAY_MS);
 
         return () => {
             console.log("useWebSocket Unmounting...");
-
-            // Clear any debounce timers
-            pendingMessagesRef.current.forEach(({ timer }) => {
-                clearTimeout(timer);
-            });
+            clearTimeout(initialConnectTimeout); // Clear initial timeout if unmounted before connecting
+            // Clear timers and close socket
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            pendingMessagesRef.current.forEach(({ timer }) => clearTimeout(timer));
             pendingMessagesRef.current.clear();
-
-            // Clear any reconnect timer
-            if (reconnectTimerRef.current) {
-                clearTimeout(reconnectTimerRef.current);
-                reconnectTimerRef.current = null;
-            }
-
-            // Close WebSocket connection
             if (ws.current && ws.current.readyState !== WebSocket.CLOSED) {
+                console.log("Closing WebSocket on unmount.")
                 ws.current.close();
-                ws.current = null;
             }
+            ws.current = null;
         };
-    }, [connectWebSocket]);
-
-    const sendMessage = useCallback((message: any) => {
-        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            const messageString = JSON.stringify(message);
-            const connectionId = message?.payload?.connectionId;
-            if (connectionId) {
-                addRawWsMessage(connectionId, 'send', messageString);
-            } else {
-                addLog(`[WS SEND] ${messageString}`);
-            }
-            try {
-                ws.current.send(messageString);
-            } catch (sendError) {
-                console.error('WebSocket send error:', sendError);
-                addLog(`[WS] Error sending message: ${sendError}`);
-            }
-        } else {
-            console.error(`WebSocket not connected (state: ${ws.current?.readyState}). Cannot send message.`);
-            addLog('[WS] Cannot send message, not connected.');
-
-            // Try to reconnect if disconnected
-            if (!ws.current || ws.current.readyState !== WebSocket.CONNECTING) {
-                connectWebSocket();
-            }
-        }
-    }, [addLog, addRawWsMessage, connectWebSocket]);
+    }, []); // <-- Set dependency array to empty
 
     return { sendMessage, isConnected };
 } 

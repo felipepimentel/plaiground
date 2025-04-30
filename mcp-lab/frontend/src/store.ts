@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 // Import shared types
 import {
-    ServerConnection
+    McpServerDefinition,
+    PromptState,
+    ResourceState,
+    ServerConnection,
+    SimpleServerInfo,
+    ToolState
 } from '@mcp-lab/shared';
 
 // Define structure for server config entries from backend
@@ -23,11 +28,25 @@ interface McpServerConfigEntry {
 type ActiveView = 'Resources' | 'Tools' | 'Prompts' | 'Messages' | null;
 
 type AppState = {
+    configuredServers: McpServerDefinition[];
     connections: ServerConnection[];
     activeServerId: string | null;
     activeView: ActiveView;
     logs: string[];
-    configuredServers: McpServerConfigEntry[]; // Add state for configured servers
+    addLog: (log: string) => void;
+    setConfiguredServers: (servers: McpServerDefinition[]) => void;
+    updateConnectionStatus: (payload: { id: string; name: string; status: ServerConnection['status']; serverInfo?: SimpleServerInfo, error?: string, reason?: string }) => void;
+    removeConnection: (id: string) => void;
+    setActiveServer: (id: string | null) => void;
+    setActiveView: (view: ActiveView) => void;
+    setResources: (connectionId: string, resources: ResourceState | null) => void;
+    setTools: (connectionId: string, tools: ToolState | null) => void;
+    setPrompts: (connectionId: string, prompts: PromptState | null) => void;
+    setResourceContent: (connectionId: string, uri: string, content: any, error?: string) => void;
+    setToolResult: (connectionId: string, toolName: string, result: any, error?: string) => void;
+    setPromptMessages: (connectionId: string, promptName: string, messages: any[], error?: string) => void;
+    addRawWsMessage: (connectionId: string, direction: 'send' | 'recv', data: string) => void;
+    handleWsMessage: (message: { type: string; payload: any }) => void;
 };
 
 // --- App Actions --- 
@@ -43,118 +62,250 @@ type AppActions = {
     setActiveView: (view: ActiveView) => void;
 
     // Configured Servers
-    setConfiguredServers: (servers: McpServerConfigEntry[]) => void; // Action to set servers
+    setConfiguredServers: (servers: McpServerDefinition[]) => void;
 
     // Data Loading (will update specific connection)
     // Types for ResourceState, ToolState, PromptState come from the imported ServerConnection type
-    setResources: (connectionId: string, resources: ServerConnection['resources']) => void;
-    setTools: (connectionId: string, tools: ServerConnection['tools']) => void;
-    setPrompts: (connectionId: string, prompts: ServerConnection['prompts']) => void;
-    setViewedResourceContent: (connectionId: string, uri: string, content?: any, error?: string) => void;
-    setLastToolResult: (connectionId: string, toolName: string, result?: any, error?: string) => void;
-    setPromptMessages: (connectionId: string, promptName: string, messages?: any[], error?: string) => void;
+    setResources: (connectionId: string, resources: ResourceState | null) => void;
+    setTools: (connectionId: string, tools: ToolState | null) => void;
+    setPrompts: (connectionId: string, prompts: PromptState | null) => void;
+    setResourceContent: (connectionId: string, uri: string, content: any, error?: string) => void;
+    setToolResult: (connectionId: string, toolName: string, result: any, error?: string) => void;
+    setPromptMessages: (connectionId: string, promptName: string, messages: any[], error?: string) => void;
     addRawWsMessage: (connectionId: string, direction: 'send' | 'recv', data: string) => void;
 
     // Logging
     addLog: (log: string) => void;
+
+    // Central message handler
+    handleWsMessage: (message: { type: string; payload: any }) => void;
 };
 
 // --- Store Implementation --- 
-export const useStore = create<AppState & AppActions>((set, get) => ({
-    // Initial State
-    connections: [],
-    activeServerId: null,
-    activeView: null,
-    logs: [],
-    configuredServers: [], // Initialize configured servers state
+export const useStore = create<AppState & AppActions>((set, get) => {
+    // --- Define internal helper for message handling ---
+    const handleWsMessageInternal = (message: { type: string; payload: any }) => {
+        const { type, payload } = message;
+        // Get other actions via get()
+        const storeActions = get();
 
-    // Actions
-    addConnection: (partialConn) => set((state) => {
-        // Ensure the connection name matches the configName if available
-        const existingConn = state.connections.find(c => c.id === partialConn.id);
-        const updatedName = existingConn?.name || partialConn.name;
-        const finalConnData = { ...partialConn, name: updatedName };
+        // Log raw messages for received MCP protocol messages, but ignore the ones echoing our sends
+        if (type === 'rawLog') {
+            if (payload.direction === 'recv') {
+                let associatedConnectionId: string | undefined;
+                if (typeof payload.data === 'string') {
+                    try {
+                        const parsedRawData = JSON.parse(payload.data);
+                        // Try to extract connectionId from known message structures
+                        associatedConnectionId = parsedRawData?.payload?.connectionId || parsedRawData?.params?.connectionId || parsedRawData?.result?.connectionId;
+                    } catch { /* ignore parse error */ }
+                }
+                if (associatedConnectionId) {
+                    storeActions.addRawWsMessage(associatedConnectionId, 'recv', payload.data);
+                } else {
+                    // Log if recv but no connectionId found
+                    // storeActions.addLog(`[WS RECV RAW Unknown]: ${payload.data.substring(0, 100)}...`);
+                }
+            } // Silently ignore rawLog messages for direction: 'send'
+            return; // Stop processing after handling rawLog
+        }
 
-        if (existingConn) {
-            return {
-                connections: state.connections.map(conn =>
-                    conn.id === finalConnData.id ? { ...conn, ...finalConnData } : conn
+        // Handle other message types by calling actions on the store instance
+        switch (type) {
+            case 'configuredServersList':
+                storeActions.setConfiguredServers(payload.servers || []);
+                break;
+            case 'connectionStatus':
+                storeActions.updateConnectionStatus(payload);
+                break;
+            case 'resourcesList':
+                storeActions.setResources(payload.connectionId, payload.data?.resources || null);
+                break;
+            case 'toolsList':
+                storeActions.setTools(payload.connectionId, payload.data?.tools || null);
+                break;
+            case 'promptsList':
+                storeActions.setPrompts(payload.connectionId, payload.data?.prompts || null);
+                break;
+            case 'resourceContent':
+                storeActions.setResourceContent(payload.connectionId, payload.uri, payload.content, payload.error);
+                break;
+            case 'toolResult':
+                storeActions.setToolResult(payload.connectionId, payload.toolName, payload.result, payload.error);
+                break;
+            case 'promptMessages':
+                storeActions.setPromptMessages(payload.connectionId, payload.promptName, payload.messages, payload.error);
+                break;
+            case 'mcpError':
+                storeActions.addLog(`[MCP ${payload.connectionId} Error] Operation: ${payload.operation || 'Unknown'} - ${payload.error}`);
+                break;
+            case 'mcpLog':
+                storeActions.addLog(`[MCP ${payload.connectionId} Log] ${payload.message}`);
+                break;
+            case 'error':
+                storeActions.addLog(`[Backend Error] ${payload.message}`);
+                break;
+            default:
+                storeActions.addLog(`[WS RECV Unknown] Type: ${type}`);
+                console.warn('Received unknown WebSocket message type:', type, payload);
+        }
+    };
+
+    // --- Return the state and actions --- 
+    return {
+        configuredServers: [],
+        connections: [],
+        activeServerId: null,
+        activeView: null,
+        logs: [],
+
+        addLog: (log) => {
+            const timestamp = new Date().toLocaleTimeString([], { hour12: false });
+            set((state) => ({ logs: [...state.logs.slice(-200), `[${timestamp}] ${log}`] }));
+        },
+
+        setConfiguredServers: (servers) => {
+            console.log('[Store] Setting configured servers:', servers);
+            set({ configuredServers: servers });
+        },
+
+        updateConnectionStatus: (payload) => {
+            const { id, name, status, serverInfo, error, reason } = payload;
+            console.log(`[Store] Updating connection status for ${name} (${id}): ${status}`);
+            set((state) => {
+                const existingIndex = state.connections.findIndex(c => c.id === id);
+                let newConnections = [...state.connections];
+                let newActiveServerId = state.activeServerId;
+
+                if (existingIndex !== -1) {
+                    const existingConn = newConnections[existingIndex];
+                    newConnections[existingIndex] = {
+                        ...existingConn,
+                        name: name || existingConn.name,
+                        status,
+                        serverInfo: serverInfo !== undefined ? serverInfo : existingConn.serverInfo,
+                        lastError: error,
+                        resources: (status === 'disconnected' || status === 'error') ? undefined : existingConn.resources,
+                        tools: (status === 'disconnected' || status === 'error') ? undefined : existingConn.tools,
+                        prompts: (status === 'disconnected' || status === 'error') ? undefined : existingConn.prompts,
+                        viewedResourceContent: (status === 'disconnected' || status === 'error') ? undefined : existingConn.viewedResourceContent,
+                        lastToolResult: (status === 'disconnected' || status === 'error') ? undefined : existingConn.lastToolResult,
+                        viewedPromptMessages: (status === 'disconnected' || status === 'error') ? undefined : existingConn.viewedPromptMessages,
+                    };
+                    if (state.activeServerId === id && (status === 'disconnected' || status === 'error')) {
+                        newActiveServerId = null;
+                    }
+                } else {
+                    newConnections.push({
+                        id,
+                        name: name,
+                        status,
+                        serverInfo,
+                        lastError: error,
+                        resources: undefined,
+                        tools: undefined,
+                        prompts: undefined,
+                        viewedResourceContent: undefined,
+                        lastToolResult: undefined,
+                        viewedPromptMessages: undefined,
+                        rawWsMessages: [],
+                    });
+                }
+                return { connections: newConnections, activeServerId: newActiveServerId };
+            });
+            get().addLog(`[Connection ${name} (${id})] Status: ${status}${error ? ` Error: ${error}` : ''}${reason ? ` Reason: ${reason}` : ''}`);
+        },
+
+        removeConnection: (id) => {
+            console.warn('[Store] removeConnection called, but status should be handled by updateConnectionStatus.');
+            set((state) => ({
+                connections: state.connections.map(c => c.id === id ? { ...c, status: 'disconnected' } : c),
+                activeServerId: state.activeServerId === id ? null : state.activeServerId
+            }));
+        },
+
+        setActiveServer: (id) => {
+            const connection = get().connections.find(c => c.id === id);
+            if (connection && connection.status === 'connected') {
+                console.log(`[Store] Setting active server to ${connection.name} (${id})`);
+                set({ activeServerId: id, activeView: 'Resources' });
+                get().addLog(`[UI] Selected server: ${connection.name}`);
+            } else if (id === null) {
+                set({ activeServerId: null, activeView: null });
+                get().addLog(`[UI] Deselected server.`);
+            } else {
+                console.warn(`[Store] Attempted to set non-existent or non-connected server active: ${id}`);
+            }
+        },
+
+        setActiveView: (view) => {
+            if (get().activeServerId) {
+                set({ activeView: view });
+                get().addLog(`[UI] Switched view to: ${view}`);
+            } else {
+                console.warn(`[Store] Cannot set view (${view}) without an active server.`);
+            }
+        },
+
+        setResources: (connectionId, resources) => {
+            set((state) => ({
+                connections: state.connections.map(c =>
+                    c.id === connectionId ? { ...c, resources: resources } : c
                 )
-            };
-        } else {
-            // When adding, check if a config name exists for this ID already in another property
-            // This part seems overly complex and potentially wrong - let's simplify.
-            // Just add the connection with the name provided.
-            return { connections: [...state.connections, { ...finalConnData }] };
-        }
-    }),
+            }));
+            get().addLog(`[Connection ${connectionId}] Received Resources list.`);
+        },
+        setTools: (connectionId, tools) => {
+            set((state) => ({
+                connections: state.connections.map(c =>
+                    c.id === connectionId ? { ...c, tools: tools } : c
+                )
+            }));
+            get().addLog(`[Connection ${connectionId}] Received Tools list.`);
+        },
+        setPrompts: (connectionId, prompts) => {
+            set((state) => ({
+                connections: state.connections.map(c =>
+                    c.id === connectionId ? { ...c, prompts: prompts } : c
+                )
+            }));
+            get().addLog(`[Connection ${connectionId}] Received Prompts list.`);
+        },
+        setResourceContent: (connectionId, uri, content, error) => {
+            set((state) => ({
+                connections: state.connections.map(c =>
+                    c.id === connectionId ? { ...c, viewedResourceContent: { uri, content, error } } : c
+                )
+            }));
+            get().addLog(`[Connection ${connectionId}] Received content for resource: ${uri}${error ? ' (Error)' : ''}`);
+        },
+        setToolResult: (connectionId, toolName, result, error) => {
+            set((state) => ({
+                connections: state.connections.map(c =>
+                    c.id === connectionId ? { ...c, lastToolResult: { toolName, result, error } } : c
+                )
+            }));
+            get().addLog(`[Connection ${connectionId}] Received result for tool: ${toolName}${error ? ' (Error)' : ''}`);
+        },
+        setPromptMessages: (connectionId, promptName, messages, error) => {
+            set((state) => ({
+                connections: state.connections.map(c =>
+                    c.id === connectionId ? { ...c, viewedPromptMessages: { promptName, messages, error } } : c
+                )
+            }));
+            get().addLog(`[Connection ${connectionId}] Received messages for prompt: ${promptName}${error ? ' (Error)' : ''}`);
+        },
+        addRawWsMessage: (connectionId, direction, data) => {
+            set((state) => ({
+                connections: state.connections.map(c =>
+                    c.id === connectionId ? {
+                        ...c,
+                        rawWsMessages: [...(c.rawWsMessages || []).slice(-50), { direction, data, timestamp: Date.now() }]
+                    } : c
+                )
+            }));
+        },
 
-    updateConnection: (id, updates) => set((state) => ({
-        connections: state.connections.map((conn) =>
-            conn.id === id ? { ...conn, ...updates } : conn
-        ),
-    })),
-
-    removeConnection: (id) => set((state) => {
-        const newConnections = state.connections.filter((conn) => conn.id !== id);
-        const newActiveServerId = state.activeServerId === id ? null : state.activeServerId;
-        return {
-            connections: newConnections,
-            activeServerId: newActiveServerId,
-            activeView: newActiveServerId === null ? null : state.activeView,
-        };
-    }),
-
-    setActiveServer: (id) => set(() => ({
-        activeServerId: id,
-        activeView: null // Reset view when changing server
-    })),
-
-    setActiveView: (view) => set({ activeView: view }),
-
-    // Action to set configured servers list
-    setConfiguredServers: (servers) => set({ configuredServers: servers }),
-
-    setResources: (connectionId, resources) => {
-        get().updateConnection(connectionId, { resources });
-    },
-
-    setTools: (connectionId, tools) => {
-        get().updateConnection(connectionId, { tools });
-    },
-
-    setPrompts: (connectionId, prompts) => {
-        get().updateConnection(connectionId, { prompts });
-    },
-
-    setViewedResourceContent: (connectionId, uri, content, error) => {
-        get().updateConnection(connectionId, { viewedResourceContent: { uri, content, error } });
-    },
-
-    setLastToolResult: (connectionId, toolName, result, error) => {
-        get().updateConnection(connectionId, { lastToolResult: { toolName, result, error } });
-    },
-
-    setPromptMessages: (connectionId, promptName, messages, error) => {
-        get().updateConnection(connectionId, { viewedPromptMessages: { promptName, messages: messages || [], error } });
-    },
-
-    addRawWsMessage: (connectionId, direction, data) => {
-        const connection = get().connections.find(c => c.id === connectionId);
-        if (connection) {
-            const newMessage = { direction, timestamp: Date.now(), data };
-            // Limit stored messages per connection to avoid memory issues
-            const MAX_MESSAGES = 200;
-            const updatedMessages = [...(connection.rawWsMessages || []).slice(-MAX_MESSAGES + 1), newMessage];
-            get().updateConnection(connectionId, { rawWsMessages: updatedMessages });
-        } else {
-            console.warn(`Received raw WS message for unknown connection ${connectionId}`);
-            get().addLog(`[Orphaned WS ${direction}]: ${data.substring(0, 100)}...`);
-        }
-    },
-
-    addLog: (log) => set((state) => ({
-        // Limit total logs displayed
-        logs: [...state.logs.slice(-500 + 1), `${new Date().toLocaleTimeString()}: ${log}`]
-    }))
-})); 
+        handleWsMessage: handleWsMessageInternal, // Assign the internal handler
+    };
+}); 

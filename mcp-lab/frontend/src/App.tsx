@@ -1,812 +1,597 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 // Use shared types
 import {
-    PromptState,
-    ResourceState,
-    ServerConnection,
-    SimpleParameterSchema,
-    SimplePromptDefinition,
-    SimpleResource,
-    SimpleToolDefinition,
-    ToolState
+    ServerConnection
 } from '@mcp-lab/shared';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStore } from './store';
 
-// --- Updated TopBar --- 
+// --- Constants for Styling ---
+// UI color palette sourced from Tailwind variables
+const colors = {
+    primary: {
+        light: 'bg-primary-50',
+        main: 'bg-primary-500',
+        dark: 'bg-primary-700',
+        text: 'text-primary-600',
+        border: 'border-primary-500',
+        hover: 'hover:bg-primary-600',
+    },
+    secondary: {
+        light: 'bg-gray-50',
+        main: 'bg-gray-100',
+        dark: 'bg-gray-200',
+        text: 'text-gray-700',
+        border: 'border-gray-300',
+        hover: 'hover:bg-gray-100',
+    },
+    success: {
+        main: 'bg-green-500',
+        text: 'text-green-500',
+        border: 'border-green-500',
+    },
+    warning: {
+        main: 'bg-amber-500',
+        text: 'text-amber-500',
+        border: 'border-amber-500',
+    },
+    error: {
+        main: 'bg-red-500',
+        text: 'text-red-500',
+        border: 'border-red-500',
+        light: 'bg-red-50',
+    },
+};
 
-function TopBar() {
-    const { sendMessage } = useWebSocket();
-    const { configuredServers } = useStore(); // Get configured servers from store
-    const [selectedServerId, setSelectedServerId] = useState<string>('');
+// Panel styling
+const panelPadding = "p-4";
+const panelBg = "bg-white";
+const panelBorder = "border-r border-gray-200";
+const panelShadow = "shadow-sm";
+const panelRounded = "rounded-lg";
 
-    // Update selected server when the list changes (e.g., on initial load)
-    useEffect(() => {
-        if (configuredServers.length > 0 && !selectedServerId) {
-            setSelectedServerId(configuredServers[0].id);
-        }
-        // If the currently selected ID is no longer valid, reset
-        if (selectedServerId && !configuredServers.some(s => s.id === selectedServerId)) {
-            setSelectedServerId(configuredServers.length > 0 ? configuredServers[0].id : '');
-        }
-    }, [configuredServers, selectedServerId]);
+// Typography
+const titleClass = "text-lg font-semibold mb-4 text-gray-800";
+const subtitleClass = "text-base font-medium mb-3 text-gray-700";
+const textClass = "text-sm text-gray-600";
 
-    const handleConnect = () => {
-        if (!selectedServerId) {
-            alert('Please select a server to connect.');
-            return;
-        }
-        console.log(`[Frontend] Sending connectConfigured for serverId: ${selectedServerId}`);
-        sendMessage({ type: 'connectConfigured', payload: { serverId: selectedServerId } });
-    };
+// Lists
+const listClass = "list-none p-0 m-0 space-y-1";
+const listItemBaseClass = "p-2 rounded-md text-sm transition-all duration-200 ease-in-out";
+const listItemHoverClass = "hover:bg-gray-100";
+const listItemActiveClass = `${colors.primary.light} ${colors.primary.text} font-medium`;
 
-    return (
-        <div style={styles.topBar}>
-            <h1>MCP Exploration Lab</h1>
-            <div style={styles.connectForm}>
-                <select
-                    value={selectedServerId}
-                    onChange={(e) => setSelectedServerId(e.target.value)}
-                    style={{ ...styles.input, minWidth: '250px' }} // Style the dropdown
-                    disabled={configuredServers.length === 0}
-                >
-                    {configuredServers.length === 0 && <option value="">Loading servers...</option>}
-                    {configuredServers.map(server => (
-                        <option key={server.id} value={server.id} title={server.description}>
-                            {server.name}
-                        </option>
-                    ))}
-                </select>
-                <button
-                    onClick={handleConnect}
-                    style={styles.button}
-                    disabled={!selectedServerId}
-                >
-                    Connect Server
-                </button>
-            </div>
-        </div>
-    );
-}
+// Buttons
+const buttonBaseClass = "px-4 py-2 text-sm rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-400 transition-all duration-200 ease-in-out font-medium";
+const buttonPrimaryClass = `${buttonBaseClass} ${colors.primary.main} text-white ${colors.primary.hover} disabled:opacity-50 disabled:cursor-not-allowed`;
+const buttonSecondaryClass = `${buttonBaseClass} bg-white ${colors.secondary.text} ${colors.secondary.hover} border ${colors.secondary.border} disabled:opacity-50 disabled:cursor-not-allowed`;
+const buttonSmallClass = "px-3 py-1.5 text-xs";
+
+// Inputs
+const inputBaseClass = "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100";
+const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+const formGroupClass = "mb-4";
+
+// Code and pre-formatted text
+const preformattedClass = "text-sm whitespace-pre-wrap break-all bg-gray-50 p-3 border border-gray-200 rounded-md font-mono max-h-96 overflow-y-auto";
+const errorPreformattedClass = "text-red-700 bg-red-50 p-3 rounded-md border border-red-200 text-sm whitespace-pre-wrap break-all font-mono";
+const emptyStateClass = "text-gray-500 italic p-6 text-center";
+
+// Status indicators
+const statusIndicator = {
+    connected: `text-green-500`,
+    connecting: `text-amber-500 animate-pulse`,
+    disconnected: `text-gray-400`,
+    error: `text-red-500`,
+};
+
+// Cards
+const cardClass = `bg-white ${panelShadow} ${panelRounded} border ${colors.secondary.border} overflow-hidden`;
+
+// --- REVISED ServerSelector ---
 
 function ServerSelector() {
-    const { connections, activeServerId, setActiveServer } = useStore();
-    const { sendMessage } = useWebSocket();
+    const { sendMessage, isConnected } = useWebSocket();
+    const { configuredServers, connections, activeServerId, setActiveServer } = useStore();
 
-    const handleDisconnect = (id: string, e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent row click
-        sendMessage({ type: 'disconnect', payload: { connectionId: id } });
-    };
+    const handleConnect = useCallback((serverName: string) => {
+        console.log(`[Frontend] Sending connectConfigured for serverName: ${serverName}`);
+        sendMessage({ type: 'connectConfigured', payload: { serverName } });
+    }, [sendMessage]);
+
+    const handleDisconnect = useCallback((connectionId: string) => {
+        sendMessage({ type: 'disconnect', payload: { connectionId } });
+    }, [sendMessage]);
+
+    const handleConnectAll = useCallback(() => {
+        console.log('[Frontend] Connecting all disconnected servers...');
+        configuredServers.forEach(config => {
+            const existingConnection = connections.find(c => c.name === config.name);
+            if (!existingConnection || existingConnection.status === 'disconnected' || existingConnection.status === 'error') {
+                handleConnect(config.name);
+            }
+        });
+    }, [configuredServers, connections, handleConnect]);
+
+    // Derive a combined list for rendering
+    const serverList = useMemo(() => {
+        return configuredServers.map(config => {
+            const activeConn = connections.find(c => c.name === config.name);
+            return {
+                name: config.name,
+                description: config.description,
+                connectionId: activeConn?.id,
+                status: activeConn?.status || 'disconnected',
+                serverInfo: activeConn?.serverInfo,
+                error: activeConn?.lastError
+            };
+        });
+    }, [configuredServers, connections]);
 
     return (
-        <div style={styles.serverSelector}>
-            <h3>Servers</h3>
-            <ul style={styles.serverList}>
-                {connections.map((conn) => (
-                    <li
-                        key={conn.id}
-                        onClick={() => setActiveServer(conn.id)}
-                        style={{
-                            ...styles.serverListItem,
-                            fontWeight: activeServerId === conn.id ? 'bold' : 'normal'
-                        }}
+        <div className="w-64 border-r border-gray-200 bg-white">
+            <div className="p-4 border-b border-gray-200">
+                <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-lg font-semibold text-gray-800">Servers</h3>
+                    <button
+                        onClick={handleConnectAll}
+                        className="btn btn-primary btn-sm inline-flex items-center"
+                        disabled={!isConnected || configuredServers.length === 0}
                     >
-                        <span>{conn.name} ({conn.status})</span>
-                        {conn.status !== 'disconnected' && conn.status !== 'error' && (
-                            <button
-                                onClick={(e) => handleDisconnect(conn.id, e)}
-                                style={styles.disconnectButton}
-                            >
-                                X
-                            </button>
-                        )}
-                    </li>
-                ))}
-                {connections.length === 0 && <p style={{ color: '#666' }}>No active connections.</p>}
-            </ul>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                            <path d="M5 12h14"></path>
+                            <path d="M12 5v14"></path>
+                        </svg>
+                        Connect All
+                    </button>
+                </div>
+
+                {!isConnected && (
+                    <div className="text-amber-600 text-xs p-2 bg-amber-50 rounded-md flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                            <line x1="12" y1="9" x2="12" y2="13"></line>
+                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                        </svg>
+                        WebSocket disconnected
+                    </div>
+                )}
+            </div>
+
+            <div className="overflow-y-auto max-h-[calc(100vh-12rem)] scrollbar-thin">
+                {serverList.length === 0 ? (
+                    <div className="p-6 text-center text-gray-500 italic">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mx-auto mb-2 opacity-40">
+                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                        </svg>
+                        No servers configured
+                    </div>
+                ) : (
+                    <ul className="divide-y divide-gray-200 animate-fade-in">
+                        {serverList.map((server) => {
+                            const isActive = server.connectionId === activeServerId;
+                            const canBeActive = server.connectionId && server.status === 'connected';
+
+                            // Get status classes
+                            const getStatusClass = (status: ServerConnection['status']) => {
+                                switch (status) {
+                                    case 'connected': return 'status-connected';
+                                    case 'connecting': return 'status-connecting';
+                                    case 'error': return 'status-error';
+                                    default: return 'status-disconnected';
+                                }
+                            };
+
+                            return (
+                                <li key={server.name}
+                                    className={`p-3 transition-all duration-200 ${isActive ? 'border-l-4 border-primary-500 bg-primary-50' : 'border-l-4 border-transparent hover:border-gray-200'}`}>
+                                    <div className="flex flex-col space-y-2">
+                                        <div className="flex justify-between items-start">
+                                            <div
+                                                className={`cursor-pointer flex items-center ${canBeActive ? 'hover:text-primary-600' : ''}`}
+                                                onClick={() => canBeActive && setActiveServer(server.connectionId)}
+                                            >
+                                                <span className={`status-indicator ${getStatusClass(server.status)}`}></span>
+                                                <span className={`font-medium ${isActive ? 'text-primary-700' : ''}`}>
+                                                    {server.name}
+                                                </span>
+                                            </div>
+
+                                            {/* Toggle Switch instead of buttons */}
+                                            <div className="relative inline-block w-10 align-middle select-none">
+                                                <input
+                                                    type="checkbox"
+                                                    id={`toggle-${server.name}`}
+                                                    className="sr-only"
+                                                    checked={server.status === 'connected' || server.status === 'connecting'}
+                                                    onChange={() => {
+                                                        if (server.status === 'connected' || server.status === 'connecting') {
+                                                            server.connectionId && handleDisconnect(server.connectionId);
+                                                        } else {
+                                                            handleConnect(server.name);
+                                                        }
+                                                    }}
+                                                    disabled={server.status === 'connecting'}
+                                                />
+                                                <label
+                                                    htmlFor={`toggle-${server.name}`}
+                                                    className={`
+                                                        block overflow-hidden h-5 rounded-full cursor-pointer transition-colors duration-200 ease-in
+                                                        ${(server.status === 'connected' || server.status === 'connecting')
+                                                            ? 'bg-primary-500'
+                                                            : 'bg-gray-300'
+                                                        }
+                                                        ${server.status === 'connecting' ? 'opacity-60' : ''}
+                                                    `}
+                                                >
+                                                    <span
+                                                        className={`
+                                                            block h-4 w-4 ml-0.5 mt-0.5 rounded-full bg-white shadow transform transition-transform duration-200 ease-in
+                                                            ${(server.status === 'connected' || server.status === 'connecting') ? 'translate-x-5' : ''}
+                                                        `}
+                                                    />
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        {server.description && (
+                                            <p className="text-xs text-gray-500 ml-5">
+                                                {server.description}
+                                            </p>
+                                        )}
+
+                                        {server.status === 'connecting' && (
+                                            <p className="text-xs text-amber-600 ml-5 flex items-center">
+                                                <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                Connecting...
+                                            </p>
+                                        )}
+
+                                        {server.status === 'error' && (
+                                            <p className="text-xs text-red-600 ml-5 flex items-center">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                                                    <circle cx="12" cy="12" r="10"></circle>
+                                                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                                                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                                </svg>
+                                                Connection error
+                                            </p>
+                                        )}
+                                    </div>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </div>
         </div>
     );
 }
 
 function Navigation() {
     const { activeServerId, setActiveView, activeView } = useStore();
-    const isDisabled = !activeServerId || useStore.getState().connections.find(c => c.id === activeServerId)?.status !== 'connected';
+    const isConnectedAndActive = useStore(state => {
+        const conn = state.connections.find(c => c.id === state.activeServerId);
+        return conn?.status === 'connected';
+    });
+    const isDisabled = !activeServerId || !isConnectedAndActive;
 
-    const views: Array<'Resources' | 'Tools' | 'Prompts' | 'Messages'> = ['Resources', 'Tools', 'Prompts', 'Messages'];
-
-    return (
-        <div style={styles.navigation}>
-            <h4>Explore</h4>
-            <ul style={styles.navList}>
-                {views.map((view) => (
-                    <li
-                        key={view}
-                        onClick={() => !isDisabled && setActiveView(view)}
-                        style={{
-                            ...styles.navListItem,
-                            cursor: isDisabled ? 'not-allowed' : 'pointer',
-                            color: isDisabled ? '#aaa' : (activeView === view ? '#007bff' : '#333'),
-                            fontWeight: activeView === view ? 'bold' : 'normal'
-                        }}
-                    >
-                        {view}
-                    </li>
-                ))}
-            </ul>
-        </div>
-    );
-}
-
-// --- Viewer Components --- (Basic Placeholders)
-
-function ResourceViewer({ connectionId, resources, viewedContent }: {
-    connectionId: string;
-    resources: ResourceState | undefined;
-    viewedContent: ServerConnection['viewedResourceContent'] | undefined;
-}) {
-    const { sendMessage } = useWebSocket();
-    const [selectedUri, setSelectedUri] = useState<string | null>(null);
-
-    const handleResourceClick = (uri: string) => {
-        setSelectedUri(uri);
-        sendMessage({
-            type: 'readResource',
-            payload: { connectionId, uri }
-        });
-    };
-
-    if (!resources) return <p>Loading resources or not available...</p>;
-    if (resources.length === 0) return <p>No resources exposed by this server.</p>;
+    const views = [
+        {
+            id: 'Resources', icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 3h18v18H3zM3 9h18M9 21V9"></path>
+                </svg>
+            )
+        },
+        {
+            id: 'Tools', icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            )
+        },
+        {
+            id: 'Prompts', icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+            )
+        },
+        {
+            id: 'Messages', icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                    <polyline points="22,6 12,13 2,6"></polyline>
+                </svg>
+            )
+        }
+    ];
 
     return (
-        <div style={{ display: 'flex', gap: '20px', height: '100%' }}>
-            <div style={{ width: '40%', borderRight: '1px solid #ccc', paddingRight: '10px', overflowY: 'auto' }}>
-                <h4>Resources</h4>
-                <ul style={{ listStyle: 'none', padding: 0 }}>
-                    {resources.map((res: SimpleResource) => (
-                        <li
-                            key={res.uri}
-                            onClick={() => handleResourceClick(res.uri)}
-                            style={{
-                                padding: '5px',
-                                cursor: 'pointer',
-                                backgroundColor: selectedUri === res.uri ? '#e0e0e0' : 'transparent'
-                            }}
-                        >
-                            {res.uri}
-                            {res.description && <span style={{ color: '#666', fontSize: '0.9em' }}> - {res.description}</span>}
-                        </li>
-                    ))}
-                </ul>
-            </div>
-            <div style={{ width: '60%', overflowY: 'auto' }}>
-                <h4>Content{selectedUri ? `: ${selectedUri}` : ''}</h4>
-                {selectedUri && viewedContent?.uri === selectedUri ? (
-                    viewedContent.error ? (
-                        <pre style={{ color: 'red' }}>Error: {viewedContent.error}</pre>
-                    ) : viewedContent.content ? (
-                        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#f9f9f9', padding: '10px', border: '1px solid #eee' }}>
-                            {/* Basic rendering - assumes text content for now */}
-                            {/* TODO: Handle different mime-types (images, JSON etc.) */}
-                            {JSON.stringify(viewedContent.content, null, 2)}
-                        </pre>
-                    ) : (
-                        <p>Loading content...</p>
-                    )
-                ) : (
-                    <p>Select a resource from the list to view its content.</p>
-                )}
-            </div>
-        </div>
-    );
-}
+        <div className="w-48 border-r border-gray-200 bg-gray-50">
+            <div className="p-4">
+                <h4 className="text-base font-semibold mb-3 text-gray-700 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                    Explore
+                </h4>
 
-function ToolViewer({ connectionId, tools, lastResult }: {
-    connectionId: string;
-    tools: ToolState | undefined;
-    lastResult: ServerConnection['lastToolResult'] | undefined;
-}) {
-    const { sendMessage } = useWebSocket();
-    const [selectedTool, setSelectedTool] = useState<SimpleToolDefinition | null>(null);
-    const [toolArgs, setToolArgs] = useState<{ [key: string]: any }>({});
+                <div className="card overflow-hidden">
+                    {views.map((view, index) => {
+                        const viewIsActive = activeView === view.id && !isDisabled;
 
-    const handleToolSelect = (tool: SimpleToolDefinition) => {
-        setSelectedTool(tool);
-        setToolArgs({}); // Reset args when changing tool
-    };
-
-    const handleArgChange = (paramName: string, value: string) => {
-        // Very basic handling - assumes string inputs, no validation yet
-        setToolArgs(prev => ({ ...prev, [paramName]: value }));
-    };
-
-    const handleCallTool = () => {
-        if (!selectedTool) return;
-        sendMessage({
-            type: 'callTool',
-            payload: {
-                connectionId,
-                toolName: selectedTool.name,
-                args: toolArgs // Send the collected arguments
-            }
-        });
-    };
-
-    if (!tools) return <p>Loading tools or not available...</p>;
-    if (tools.length === 0) return <p>No tools exposed by this server.</p>;
-
-    return (
-        <div style={{ display: 'flex', gap: '20px', height: '100%' }}>
-            {/* Tool List */}
-            <div style={{ width: '40%', borderRight: '1px solid #ccc', paddingRight: '10px', overflowY: 'auto' }}>
-                <h4>Tools</h4>
-                <ul style={{ listStyle: 'none', padding: 0 }}>
-                    {tools.map((tool: SimpleToolDefinition) => (
-                        <li
-                            key={tool.name}
-                            onClick={() => handleToolSelect(tool)}
-                            style={{
-                                padding: '5px',
-                                cursor: 'pointer',
-                                backgroundColor: selectedTool?.name === tool.name ? '#e0e0e0' : 'transparent'
-                            }}
-                        >
-                            {tool.name}
-                            {tool.description && <span style={{ color: '#666', fontSize: '0.9em' }}> - {tool.description}</span>}
-                        </li>
-                    ))}
-                </ul>
-            </div>
-
-            {/* Tool Detail & Execution */}
-            <div style={{ width: '60%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-                <h4>Details & Execution{selectedTool ? `: ${selectedTool.name}` : ''}</h4>
-                {!selectedTool ? (
-                    <p>Select a tool from the list.</p>
-                ) : (
-                    <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                        <p><strong>Description:</strong> {selectedTool.description || 'N/A'}</p>
-
-                        {/* Basic Argument Form - Needs improvement for complex schemas */}
-                        <h5>Arguments:</h5>
-                        {selectedTool.parameters?.properties && Object.keys(selectedTool.parameters.properties).length > 0 ? (
-                            <div style={{ marginBottom: '15px' }}>
-                                {Object.entries(selectedTool.parameters.properties).map(([name, schema]: [string, SimpleParameterSchema]) => (
-                                    <div key={name} style={{ marginBottom: '10px' }}>
-                                        <label style={{ display: 'block', marginBottom: '3px' }}>
-                                            {name}
-                                            {selectedTool?.parameters?.required?.includes(name) ? '*' : ''}
-                                            {schema.description && <span style={{ fontSize: '0.8em', color: '#555' }}> ({schema.description})</span>}
-                                            {schema.type && <em style={{ fontSize: '0.8em', color: '#777' }}> [{schema.type}]</em>}
-                                        </label>
-                                        {/* Simplistic input - assumes string/text */}
-                                        <input
-                                            type="text"
-                                            value={toolArgs[name] || ''}
-                                            onChange={(e) => handleArgChange(name, e.target.value)}
-                                            style={{ ...styles.input, width: '90%' }}
-                                            placeholder={schema.type || 'string'}
-                                        />
-                                    </div>
-                                ))}
-                                <button onClick={handleCallTool} style={styles.button}>Call Tool</button>
+                        return (
+                            <div
+                                key={view.id}
+                                onClick={() => !isDisabled && setActiveView(view.id as any)}
+                                className={`
+                                    p-3 cursor-pointer text-sm border-b border-gray-200 flex items-center
+                                    ${viewIsActive
+                                        ? 'bg-primary-500 text-white font-medium'
+                                        : 'hover:bg-gray-50 text-gray-700'
+                                    }
+                                    ${index === views.length - 1 ? 'border-b-0' : ''}
+                                    ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}
+                                    transition-all duration-200
+                                `}
+                            >
+                                <span className="mr-2">{view.icon}</span>
+                                {view.id}
                             </div>
-                        ) : (
-                            <>
-                                <p>This tool does not require arguments.</p>
-                                <button onClick={handleCallTool} style={styles.button}>Call Tool</button>
-                            </>
-                        )}
+                        );
+                    })}
+                </div>
 
-                        {/* Result Display */}
-                        {lastResult && lastResult.toolName === selectedTool.name && (
-                            <div style={{ marginTop: '15px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
-                                <h5>Last Result:</h5>
-                                {lastResult.error ? (
-                                    <pre style={{ color: 'red' }}>Error: {lastResult.error}</pre>
-                                ) : (
-                                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#f9f9f9', padding: '10px', border: '1px solid #eee' }}>
-                                        {/* TODO: Better rendering based on result content type */}
-                                        {JSON.stringify(lastResult.result, null, 2)}
-                                    </pre>
-                                )}
-                            </div>
-                        )}
+                {isDisabled && (
+                    <div className="mt-4 p-3 bg-yellow-50 rounded-md border border-yellow-200 text-xs text-yellow-700 animate-fade-in">
+                        <div className="flex items-center mb-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                            </svg>
+                            <span className="font-medium">Connection Required</span>
+                        </div>
+                        <p>Please select a connected server to explore its features.</p>
                     </div>
                 )}
             </div>
         </div>
     );
 }
-
-function PromptViewer({ connectionId, prompts, viewedMessagesInfo }: {
-    connectionId: string;
-    prompts: PromptState | undefined;
-    viewedMessagesInfo: ServerConnection['viewedPromptMessages'] | undefined;
-}) {
-    const { sendMessage } = useWebSocket();
-    const [selectedPrompt, setSelectedPrompt] = useState<SimplePromptDefinition | null>(null);
-    const [promptArgs, setPromptArgs] = useState<{ [key: string]: any }>({});
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-    useEffect(() => {
-        // Reset error message when component remounts or prompts change
-        setErrorMessage(null);
-    }, [connectionId, prompts]);
-
-    // Check for the specific "Method not found" error
-    useEffect(() => {
-        if (prompts === undefined) {
-            const connections = useStore.getState().connections;
-            const connection = connections.find(c => c.id === connectionId);
-
-            // Check if we received a method not found error for this connection
-            if (connection && !connection.prompts) {
-                const logs = useStore.getState().logs;
-                const hasMethodNotFoundError = logs.some(log =>
-                    log.includes(`[MCP ${connectionId} Error`) &&
-                    log.includes('Method not found')
-                );
-
-                if (hasMethodNotFoundError) {
-                    setErrorMessage('This server does not support prompts.');
-                }
-            }
-        }
-    }, [connectionId, prompts]);
-
-    const handlePromptSelect = (prompt: SimplePromptDefinition) => {
-        setSelectedPrompt(prompt);
-        setPromptArgs({}); // Reset args when changing prompt
-    };
-
-    const handleArgChange = (paramName: string, value: string) => {
-        setPromptArgs(prev => ({ ...prev, [paramName]: value }));
-    };
-
-    const handleGetPrompt = () => {
-        if (!selectedPrompt) return;
-        sendMessage({
-            type: 'getPrompt',
-            payload: {
-                connectionId,
-                promptName: selectedPrompt.name,
-                args: promptArgs // Send the collected arguments
-            }
-        });
-    };
-
-    // Display error if prompts API is not supported
-    if (errorMessage) {
-        return <p>{errorMessage}</p>;
-    }
-
-    if (!prompts) return <p>Loading prompts or not available...</p>;
-    if (prompts.length === 0) return <p>No prompts exposed by this server.</p>;
-
-    // Use SimplePromptDefinition
-    const getArguments = (promptDef: SimplePromptDefinition | null) => {
-        if (!promptDef || !promptDef.argumentsSchema) return {};
-        return promptDef.argumentsSchema.properties || {};
-    };
-    const argumentProperties = getArguments(selectedPrompt);
-
-    return (
-        <div style={{ display: 'flex', gap: '20px', height: '100%' }}>
-            {/* Prompt List */}
-            <div style={{ width: '40%', borderRight: '1px solid #ccc', paddingRight: '10px', overflowY: 'auto' }}>
-                <h4>Prompts</h4>
-                <ul style={{ listStyle: 'none', padding: 0 }}>
-                    {prompts.map((prompt: SimplePromptDefinition) => (
-                        <li
-                            key={prompt.name}
-                            onClick={() => handlePromptSelect(prompt)}
-                            style={{
-                                padding: '5px',
-                                cursor: 'pointer',
-                                backgroundColor: selectedPrompt?.name === prompt.name ? '#e0e0e0' : 'transparent'
-                            }}
-                        >
-                            {prompt.name}
-                            {prompt.description && <span style={{ color: '#666', fontSize: '0.9em' }}> - {prompt.description}</span>}
-                        </li>
-                    ))}
-                </ul>
-            </div>
-
-            {/* Prompt Detail & Execution */}
-            <div style={{ width: '60%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-                <h4>Details & Messages{selectedPrompt ? `: ${selectedPrompt.name}` : ''}</h4>
-                {!selectedPrompt ? (
-                    <p>Select a prompt from the list.</p>
-                ) : (
-                    <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                        <p><strong>Description:</strong> {selectedPrompt.description || 'N/A'}</p>
-
-                        <h5>Arguments:</h5>
-                        {/* Use argumentProperties derived from SimplePromptDefinition */}
-                        {Object.keys(argumentProperties).length > 0 ? (
-                            <div style={{ marginBottom: '15px' }}>
-                                {/* Use SimpleParameterSchema */}
-                                {Object.entries(argumentProperties).map(([name, schema]: [string, SimpleParameterSchema]) => (
-                                    <div key={name} style={{ marginBottom: '10px' }}>
-                                        <label style={{ display: 'block', marginBottom: '3px' }}>
-                                            {name}
-                                            {selectedPrompt?.argumentsSchema?.required?.includes(name) ? '*' : ''}
-                                            {/* Access properties safely */}
-                                            {schema.description && <span style={{ fontSize: '0.8em', color: '#555' }}> ({schema.description})</span>}
-                                            {schema.type && <em style={{ fontSize: '0.8em', color: '#777' }}> [{schema.type}]</em>}
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={promptArgs[name] || ''}
-                                            onChange={(e) => handleArgChange(name, e.target.value)}
-                                            style={{ ...styles.input, width: '90%' }}
-                                            placeholder={schema.type || 'string'}
-                                        />
-                                    </div>
-                                ))}
-                                <button onClick={handleGetPrompt} style={styles.button}>Get Prompt Messages</button>
-                            </div>
-                        ) : (
-                            <>
-                                <p>This prompt does not require arguments.</p>
-                                <button onClick={handleGetPrompt} style={styles.button}>Get Prompt Messages</button>
-                            </>
-                        )}
-
-                        {/* Result Display */}
-                        {viewedMessagesInfo && viewedMessagesInfo.promptName === selectedPrompt.name && (
-                            <div style={{ marginTop: '15px', borderTop: '1px solid #eee', paddingTop: '10px', flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                <h5>Generated Messages:</h5>
-                                {viewedMessagesInfo.error ? (
-                                    <pre style={{ color: 'red' }}>Error: {viewedMessagesInfo.error}</pre>
-                                ) : (
-                                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#f9f9f9', padding: '10px', border: '1px solid #eee', flexGrow: 1, overflowY: 'auto' }}>
-                                        {JSON.stringify(viewedMessagesInfo.messages, null, 2)}
-                                    </pre>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
-
-// MessageViewer - uses shared ServerConnection type indirectly via props
-function MessageViewer({ messages }: {
-    messages: ServerConnection['rawWsMessages'] | undefined
-}) {
-    const messageContainerRef = useRef<HTMLDivElement>(null);
-
-    // Auto-scroll to bottom
-    useEffect(() => {
-        if (messageContainerRef.current) {
-            messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
-        }
-    }, [messages]);
-
-    const formatTimestamp = (timestamp: number) => {
-        return new Date(timestamp).toLocaleTimeString([], { hour12: false });
-    };
-
-    const formatJson = (data: string) => {
-        try {
-            return JSON.stringify(JSON.parse(data), null, 2);
-        } catch {
-            return data; // Return raw data if not valid JSON
-        }
-    };
-
-    return (
-        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <h4>Raw WebSocket Messages</h4>
-            <div ref={messageContainerRef} style={styles.logArea}>
-                {(!messages || messages.length === 0) && <p style={{ color: '#aaa' }}>No messages recorded for this connection yet.</p>}
-                {messages?.map((msg: { direction: 'send' | 'recv'; timestamp: number; data: string }, index: number) => (
-                    <div key={index} style={{ marginBottom: '10px', borderBottom: '1px dashed #555', paddingBottom: '5px' }}>
-                        <strong style={{ color: msg.direction === 'send' ? '#8f8' : '#f88' }}>
-                            [{formatTimestamp(msg.timestamp)}] {msg.direction === 'send' ? 'SEND ->' : '<-'} RECV:
-                        </strong>
-                        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '5px 0 0 0' }}>
-                            {formatJson(msg.data)}
-                        </pre>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-// --- Main Content Area --- 
 
 function MainContentArea() {
-    const { activeServerId, activeView } = useStore();
-    const { sendMessage, isConnected } = useWebSocket();
-    const connections = useStore((state) => state.connections);
+    const { connections, activeServerId, activeView } = useStore();
 
-    // Memoize the active connection to prevent unnecessary re-renders
-    const activeConnection = useMemo(() =>
-        connections.find(c => c.id === activeServerId),
-        [connections, activeServerId]
-    );
+    const activeConnection = useMemo(() => {
+        return connections.find(c => c.id === activeServerId);
+    }, [connections, activeServerId]);
 
-    // Track unsupported methods
-    const [unsupportedMethods, setUnsupportedMethods] = useState<Set<string>>(new Set());
+    if (!activeConnection) {
+        return (
+            <div className="flex-grow p-6 flex items-center justify-center bg-gray-50">
+                <div className="text-center max-w-md animate-fade-in">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
+                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                        </svg>
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-700 mb-2">No Server Selected</h3>
+                    <p className="text-gray-500">
+                        Select a connected server from the list to explore its resources, tools, prompts, and messages.
+                    </p>
+                    <div className="mt-4 flex justify-center">
+                        <div className="inline-flex items-center p-1 rounded-md bg-gray-100 text-xs text-gray-500">
+                            <span className="px-2">Connect a server to get started</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
-    // Reset unsupported methods when active server changes
-    useEffect(() => {
-        setUnsupportedMethods(new Set());
-    }, [activeServerId]);
-
-    // Monitor for method not found errors
-    useEffect(() => {
-        const logs = useStore.getState().logs;
-
-        // Check recent logs for method not found errors
-        if (activeConnection) {
-            const methodNotFoundErrors = logs
-                .filter(log => log.includes(`[MCP ${activeConnection.id} Error`) && log.includes('Method not found'))
-                .map(log => {
-                    // Extract operation name from log entry
-                    const match = log.match(/\boperation: "([^"]+)"/);
-                    const operation = match ? match[1] :
-                        log.match(/\(([^)]+)\)/) ? log.match(/\(([^)]+)\)/)[1] : null;
-                    return operation;
-                })
-                .filter(Boolean) as string[];
-
-            if (methodNotFoundErrors.length > 0) {
-                setUnsupportedMethods(prev => {
-                    const updated = new Set(prev);
-                    methodNotFoundErrors.forEach(method => updated.add(method));
-                    return updated;
-                });
-            }
-        }
-    }, [activeConnection, useStore.getState().logs]);
-
-    // Fetch data when active server or view changes
-    useEffect(() => {
-        // Skip effect if no connection or not connected or WebSocket not connected
-        if (!activeConnection || activeConnection.status !== 'connected' || !activeView || !isConnected) {
-            return;
-        }
-
-        const connectionId = activeConnection.id;
-
-        // Track if we need to fetch data
-        let shouldFetch = false;
-        const methodName = `list${activeView}`; // e.g. listResources, listTools, listPrompts
-
-        // Don't attempt to fetch if method is known to be unsupported
-        if (unsupportedMethods.has(methodName)) {
-            console.log(`Skipping ${methodName} as it's known to be unsupported`);
-            return;
-        }
-
-        switch (activeView) {
-            case 'Resources':
-                // Fetch only if not already fetched
-                if (activeConnection.resources === undefined) {
-                    shouldFetch = true;
-                    sendMessage({ type: 'listResources', payload: { connectionId } });
-                }
-                break;
-            case 'Tools':
-                if (activeConnection.tools === undefined) {
-                    shouldFetch = true;
-                    sendMessage({ type: 'listTools', payload: { connectionId } });
-                }
-                break;
-            case 'Prompts':
-                if (activeConnection.prompts === undefined) {
-                    shouldFetch = true;
-                    sendMessage({ type: 'listPrompts', payload: { connectionId } });
-                }
-                break;
-            // Messages view doesn't require initial fetch
-        }
-
-        // Log fetch action if we're fetching
-        if (shouldFetch) {
-            console.log(`Fetching ${activeView} for ${connectionId}`);
-        }
-    }, [activeServerId, activeView, sendMessage, isConnected, unsupportedMethods]); // Include isConnected but not activeConnection
-
-    const renderView = () => {
-        if (!activeConnection || activeConnection.status !== 'connected') {
-            return <p>Select a connected server to explore.</p>;
-        }
-
-        // Check if current view method is unsupported
-        const methodName = `list${activeView}`; // e.g. listResources, listTools, listPrompts
-        if (unsupportedMethods.has(methodName)) {
-            return <p>This server does not support {activeView.toLowerCase()}.</p>;
-        }
-
-        switch (activeView) {
-            case 'Resources':
-                return <ResourceViewer
-                    connectionId={activeConnection.id}
-                    resources={activeConnection.resources}
-                    viewedContent={activeConnection.viewedResourceContent}
-                />;
-            case 'Tools':
-                return <ToolViewer
-                    connectionId={activeConnection.id}
-                    tools={activeConnection.tools}
-                    lastResult={activeConnection.lastToolResult}
-                />;
-            case 'Prompts':
-                return <PromptViewer
-                    connectionId={activeConnection.id}
-                    prompts={activeConnection.prompts}
-                    viewedMessagesInfo={activeConnection.viewedPromptMessages}
-                />;
-            case 'Messages':
-                return <MessageViewer messages={activeConnection.rawWsMessages} />;
-            default:
-                return <p>Select an item from the 'Explore' menu.</p>;
-        }
-    };
+    if (activeConnection.status !== 'connected') {
+        return (
+            <div className="flex-grow p-6 flex items-center justify-center bg-gray-50">
+                <div className="text-center max-w-md animate-fade-in">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-yellow-50 mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-400">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-700 mb-2">Server Not Connected</h3>
+                    <p className="text-gray-500">The selected server is currently {activeConnection.status}.</p>
+                    {activeConnection.status === 'error' && (
+                        <div className="mt-4 p-3 bg-red-50 rounded-md text-xs text-red-600 inline-block">
+                            Connection failed. Please try again.
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div style={styles.mainContentArea}>
-            {/* Maybe keep header separate? */}
-            {activeConnection ?
-                <h2 style={{ marginTop: 0 }}>Exploring: {activeConnection.name} ({activeConnection.status})</h2> :
-                <h2 style={{ marginTop: 0 }}>No Server Selected</h2>
-            }
-            {!isConnected && activeConnection ?
-                <p style={{ color: 'red' }}>⚠️ WebSocket disconnected. Reconnecting...</p> : null}
-            {renderView()}
+        <div className="flex-grow p-4 bg-white">
+            <div className="border-b border-gray-200 pb-3 mb-4 flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-800 flex items-center">
+                    {activeView === 'Resources' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                            <path d="M3 3h18v18H3zM3 9h18M9 21V9"></path>
+                        </svg>
+                    )}
+                    {activeView === 'Tools' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    )}
+                    {activeView === 'Prompts' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    )}
+                    {activeView === 'Messages' && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                    )}
+                    {activeView} for <span className="text-primary-600 ml-1">{activeConnection.name}</span>
+                </h2>
+
+                <div className="flex items-center">
+                    <span className="text-xs text-gray-500 mr-2">Connected</span>
+                    <span className="status-indicator status-connected"></span>
+                </div>
+            </div>
+
+            <div className="p-4 border border-gray-200 rounded-md bg-gray-50 animate-fade-in">
+                <div className="flex justify-center mb-3">
+                    <div className="inline-flex items-center p-1 rounded-md bg-gray-200 text-xs">
+                        {['Resources', 'Tools', 'Prompts', 'Messages'].map(view => (
+                            <button
+                                key={view}
+                                className={`px-3 py-1 rounded-md transition-all ${activeView === view ? 'bg-white shadow-sm' : 'hover:bg-gray-100'}`}
+                                onClick={() => activeConnection && activeConnection.status === 'connected' && useStore.getState().setActiveView(view as any)}
+                            >
+                                {view}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-md shadow-sm text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mx-auto mb-4 text-gray-300">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 8v4l4 2"></path>
+                    </svg>
+                    <p className="text-gray-600 mb-4">
+                        {activeView} functionality will be implemented soon.
+                    </p>
+                    <button className="btn btn-primary">
+                        Coming Soon
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
 
-function StatusMonitor() {
-    const logs = useStore((state) => state.logs);
-    const logContainerRef = useRef<HTMLPreElement>(null);
+function StatusBar() {
+    const { isConnected } = useWebSocket();
+    const connections = useStore(state => state.connections);
 
-    // Auto-scroll to bottom
-    useEffect(() => {
-        if (logContainerRef.current) {
-            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-        }
-    }, [logs]);
+    const connectedCount = useMemo(() =>
+        connections.filter(c => c.status === 'connected').length,
+        [connections]
+    );
+
+    const connectingCount = useMemo(() =>
+        connections.filter(c => c.status === 'connecting').length,
+        [connections]
+    );
 
     return (
-        <div style={styles.statusMonitor}>
-            <h4>Logs & Status</h4>
-            <pre ref={logContainerRef} style={styles.logArea}>
-                {logs.join('\n')}
-            </pre>
+        <div className="flex items-center space-x-3 text-sm">
+            <div className="flex items-center px-2 py-1 rounded-md bg-gray-50 border border-gray-200">
+                <div className={`status-indicator ${isConnected ? 'status-connected' : 'status-error'}`} />
+                <span className="text-gray-600">
+                    WebSocket: <span className={isConnected ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                        {isConnected ? 'Connected' : 'Disconnected'}
+                    </span>
+                </span>
+            </div>
+
+            {connectedCount > 0 && (
+                <div className="flex items-center px-2 py-1 rounded-md bg-green-50 border border-green-200">
+                    <div className="status-indicator status-connected" />
+                    <span className="text-gray-700">
+                        <span className="font-medium text-green-600">{connectedCount}</span> {connectedCount === 1 ? 'server' : 'servers'} connected
+                    </span>
+                </div>
+            )}
+
+            {connectingCount > 0 && (
+                <div className="flex items-center px-2 py-1 rounded-md bg-yellow-50 border border-yellow-200 animate-pulse">
+                    <div className="status-indicator status-connecting" />
+                    <span className="text-gray-700">
+                        <span className="font-medium text-yellow-600">{connectingCount}</span> connecting...
+                    </span>
+                </div>
+            )}
         </div>
     );
 }
-
-// --- App Layout --- 
 
 function App() {
-    // Initialize WebSocket connection by calling the hook
-    useWebSocket();
+    const { isConnected } = useWebSocket();
+    const { activeServerId } = useStore();
 
     return (
-        <div style={styles.appContainer}>
-            <TopBar />
-            <div style={styles.mainArea}>
-                <ServerSelector />
-                <Navigation />
-                <MainContentArea />
-            </div>
-            <StatusMonitor />
+        <div className="min-h-screen flex flex-col bg-gray-50">
+            {/* Header */}
+            <header className="bg-white border-b border-gray-200 shadow-sm">
+                <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+                    <h1 className="text-xl font-bold text-gray-900 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-primary-500">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                        MCP Exploration Lab
+                    </h1>
+                    <StatusBar />
+                </div>
+            </header>
+
+            {/* Main Content */}
+            <main className="flex-grow flex">
+                <div className="max-w-7xl w-full mx-auto p-4 flex">
+                    <div className="flex flex-1 bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden animate-fade-in">
+                        <ServerSelector />
+                        {activeServerId && (
+                            <>
+                                <Navigation />
+                                <MainContentArea />
+                            </>
+                        )}
+                    </div>
+                </div>
+            </main>
+
+            {/* Footer */}
+            <footer className="bg-white border-t border-gray-200 py-3">
+                <div className="max-w-7xl mx-auto px-4 flex justify-between items-center">
+                    <p className="text-sm text-gray-500">
+                        MCP Exploration Lab © {new Date().getFullYear()}
+                    </p>
+                    <div className="flex space-x-4">
+                        <a href="#" className="text-sm text-gray-500 hover:text-primary-600 transition-colors">About</a>
+                        <a href="#" className="text-sm text-gray-500 hover:text-primary-600 transition-colors">Documentation</a>
+                        <a href="#" className="text-sm text-gray-500 hover:text-primary-600 transition-colors">GitHub</a>
+                    </div>
+                </div>
+            </footer>
         </div>
     );
 }
-
-// --- Basic Styling --- (Consider moving to CSS file later)
-const styles: { [key: string]: React.CSSProperties } = {
-    appContainer: {
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        fontFamily: 'sans-serif'
-    },
-    topBar: {
-        borderBottom: '1px solid #ccc',
-        padding: '10px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: '#f8f8f8'
-    },
-    connectForm: {
-        display: 'flex',
-        gap: '10px'
-    },
-    input: {
-        padding: '5px 8px',
-        border: '1px solid #ccc',
-        borderRadius: '3px'
-    },
-    button: {
-        padding: '5px 15px',
-        cursor: 'pointer'
-    },
-    mainArea: {
-        display: 'flex',
-        flexGrow: 1,
-        overflow: 'hidden' // Prevent layout issues with fixed height/scroll
-    },
-    serverSelector: {
-        borderRight: '1px solid #ccc',
-        padding: '10px',
-        width: '250px', // Slightly wider
-        flexShrink: 0,
-        overflowY: 'auto'
-    },
-    serverList: {
-        listStyle: 'none',
-        padding: 0,
-        margin: 0
-    },
-    serverListItem: {
-        padding: '8px 5px',
-        cursor: 'pointer',
-        borderBottom: '1px dashed #eee',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-    },
-    disconnectButton: {
-        padding: '2px 5px',
-        fontSize: '10px',
-        cursor: 'pointer',
-        backgroundColor: '#fdd',
-        border: '1px solid #f99',
-        borderRadius: '3px'
-    },
-    navigation: {
-        borderRight: '1px solid #ccc',
-        padding: '10px',
-        width: '150px',
-        flexShrink: 0
-    },
-    navList: {
-        listStyle: 'none',
-        padding: 0,
-        margin: 0
-    },
-    navListItem: {
-        padding: '5px 0',
-        cursor: 'pointer'
-    },
-    mainContentArea: {
-        flexGrow: 1,
-        padding: '20px',
-        overflowY: 'auto'
-    },
-    statusMonitor: {
-        borderTop: '1px solid #ccc',
-        padding: '10px 20px',
-        height: '200px', // More space for logs
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column'
-    },
-    logArea: {
-        flexGrow: 1,
-        overflowY: 'scroll',
-        backgroundColor: '#f4f4f4',
-        border: '1px solid #eee',
-        padding: '10px',
-        fontSize: '12px',
-        whiteSpace: 'pre-wrap', // Wrap long lines
-        wordBreak: 'break-all' // Break long words/lines
-    }
-};
 
 export default App; 

@@ -1,0 +1,29 @@
+{
+    "mcpServers": {
+        "ExampleServer1": {
+            "type": "stdio",
+            "command": "echo",
+            "args": [
+                "Hello from Server 1"
+            ],
+            "description": "A simple example server."
+        },
+        "HelloWorld": {
+            "type": "stdio",
+            "command": "uv",
+            "args": [
+                "run",
+                "--directory",
+                "/home/pimentel/Workspace/pepper-ai-samples/examples/mcp/00-hello-world",
+                "server.py",
+                "--stdio"
+            ],
+            "description": "A simple example server."
+        },
+        "ExampleServer2": {
+            "type": "websocket",
+            "url": "ws://localhost:8081",
+            "description": "Another example server (WebSocket)."
+        }
+    }
+}
