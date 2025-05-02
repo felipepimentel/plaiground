@@ -32,6 +32,9 @@ export function useWebSocket() {
     // Rate limiting: track last request time for each rate-limited endpoint
     const lastRequestTimeRef = useRef<Map<string, number>>(new Map());
 
+    // Add this before the lastRequestTimeRef
+    const rateLimitKeysRef = useRef<Map<string, number>>(new Map());
+
     // Add a message queue for messages that need to be sent when connection is established
     const messageQueueRef = useRef<object[]>([]);
 
@@ -165,14 +168,22 @@ export function useWebSocket() {
             const method = mcpMessage.method;
             if (method && RATE_LIMIT_METHODS.includes(method)) {
                 const now = Date.now();
-                const lastRequestTime = lastRequestTimeRef.current.get(method) || 0;
+                // Create a unique key based on method and connectionId (if available)
+                // @ts-ignore
+                const connectionId = mcpMessage.params?.connectionId || 'global';
+                const rateLimitKey = `${method}:${connectionId}`;
+
+                const lastRequestTime = rateLimitKeysRef.current.get(rateLimitKey) || 0;
 
                 if (now - lastRequestTime < RATE_LIMIT_DELAY) {
-                    console.log(`[WebSocket] Rate limiting request for method ${method} - too frequent`);
+                    console.log(`[WebSocket] Rate limiting request for method ${method} with connectionId ${connectionId} - too frequent`);
                     return; // Skip sending if too frequent
                 }
 
                 // Update last request time
+                rateLimitKeysRef.current.set(rateLimitKey, now);
+
+                // Also update the previous tracker for backward compatibility
                 lastRequestTimeRef.current.set(method, now);
             }
 

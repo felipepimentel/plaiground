@@ -42,6 +42,19 @@
                 "--stdio"
             ],
             "description": "Git MCP Server"
+        },
+        "everything": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "@modelcontextprotocol/server-everything",
+                "--stdio"
+            ],
+            "env": {
+                "NODE_PATH": "/usr/bin/node",
+                "PATH": "/usr/local/bin:/usr/bin:/bin"
+            },
+            "description": "Everything MCP Server - Provides tools, resources, and prompts"
         }
     }
 }

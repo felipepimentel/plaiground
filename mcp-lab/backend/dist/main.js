@@ -2,7 +2,6 @@
 // This will eventually host the MCP client logic
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { InitializedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'crypto';
 import fs from 'fs'; // Import fs for file reading
 import path from 'path'; // Import path for resolving file path
@@ -325,162 +324,133 @@ async function handleConnectConfigured(ws, serverName) {
 }
 // Modify handleConnectStdio to accept optional configName and cwd override
 async function handleConnectStdio(ws, command, args, configName, configCwd) {
-    console.log(`[Backend] Entering handleConnectStdio. Server: ${configName}, Command: ${command}, Args: ${args.join(' ')}, CWD Override: ${configCwd}`);
+    // Create a unique ID for this connection
     const connectionId = randomUUID();
-    const projectRoot = path.resolve(__dirname, '../../..'); // Calculate project root path
-    const effectiveCwd = configCwd ? path.resolve(projectRoot, configCwd) : projectRoot; // Resolve custom CWD relative to root if provided
-    console.log(`[Backend] Effective CWD for server process: ${effectiveCwd}`); // Log effective CWD
-    // Check if effectiveCwd exists
-    if (!fs.existsSync(effectiveCwd)) {
-        console.error(`[Backend] Error: Calculated CWD does not exist: ${effectiveCwd}`);
-        sendWsError(ws, `Configuration error: Specified working directory does not exist: ${effectiveCwd}`);
-        return; // Stop connection attempt
-    }
-    let connection = undefined;
+    console.log(`[Backend] Creating new MCP connection ${configName} (${connectionId})`);
+    let transport;
+    let client;
+    let connection = null;
     try {
-        // Send initial connecting status using configName
-        sendWsMessage(ws, 'connectionStatus', { id: connectionId, name: configName, status: 'connecting' });
-        // Create transport with the effective cwd
-        const transport = new StdioClientTransport({
+        // Inform UI that we're starting to connect
+        sendWsMessage(ws, 'connectionStatus', {
+            id: connectionId,
+            name: configName,
+            status: 'connecting'
+        });
+        // Create a transport and client
+        transport = new StdioClientTransport({
             command,
             args,
-            cwd: effectiveCwd // Set the effective current working directory
+            cwd: configCwd
         });
-        console.log(`[Backend] Created StdioClientTransport for ${configName} with command: ${command}, args: [${args.join(', ')}], cwd: ${effectiveCwd}`);
-        const handlers = {
-            initialized: (event) => {
-                if (!connection)
-                    return;
-                console.log(`[Backend][Handler Object] MCP Client ${connection.id} (${connection.configName}) Initialized.`);
-                console.log(`[Backend] Server info received for ${connection.configName}:`, JSON.stringify(event.serverInfo));
-                if (connection.status === 'connected')
-                    return; // Already handled
-                markConnectionAsConnected(connection, event.serverInfo);
-            },
-            protocolError: (event) => {
-                if (!connection)
-                    return;
-                console.error(`MCP Protocol Error (${connection.configName} - ${connection.id}):`, event.error);
-                sendWsMessage(connection.websocket, 'mcpError', { connectionId: connection.id, error: event.error });
-                // Update status to error
-                if (connection.status !== 'error') {
-                    connection.status = 'error';
-                    sendWsMessage(connection.websocket, 'connectionStatus', {
-                        id: connection.id,
-                        name: configName,
-                        status: 'error',
-                        error: event.error || 'Protocol Error'
-                    });
-                }
-            },
-            close: (event) => {
-                if (!connection)
-                    return;
-                console.log(`MCP Connection ${connection.configName} (${connection.id}) Closed:`, event.reason, `Exit Code: ${event.code}`); // Log exit code
-                // If the connection closed while still trying to connect, and there wasn't a protocol error,
-                // treat it as a clean disconnect (likely a short-lived command like echo).
-                if (connection.status === 'connecting') {
-                    connection.status = 'disconnected';
-                    sendWsMessage(connection.websocket, 'connectionStatus', {
-                        id: connection.id,
-                        name: configName,
-                        status: 'disconnected',
-                        reason: `Process exited cleanly (code ${event.code}) before full connection.`
-                    });
-                }
-                else if (connection.status !== 'error') { // Don't overwrite error state if it closed due to an earlier error
-                    connection.status = 'disconnected';
-                    sendWsMessage(connection.websocket, 'connectionStatus', { id: connection.id, name: configName, status: 'disconnected', reason: event.reason });
-                }
-                activeConnections.delete(connection.id); // Clean up active connection
-            },
-            log: (event) => {
-                if (!connection)
-                    return;
-                console.log(`MCP Log (${connection.configName} - ${connection.id}): [${event.level}]`, event.message);
-                sendWsMessage(connection.websocket, 'mcpLog', { connectionId: connection.id, message: event.message, level: event.level });
-            },
-            'resources/listChanged': () => {
-                if (!connection || connection.status !== 'connected')
-                    return;
-                console.log(`MCP Event (${connection.configName} - ${connection.id}): resources/listChanged received.`);
-                handleListRequest(connection.websocket, connection.id, 'listResources', 'resourcesList', true);
-            },
-            'tools/listChanged': () => {
-                if (!connection || connection.status !== 'connected')
-                    return;
-                console.log(`MCP Event (${connection.configName} - ${connection.id}): tools/listChanged received.`);
-                handleListRequest(connection.websocket, connection.id, 'listTools', 'toolsList', true);
-            },
-            'prompts/listChanged': () => {
-                if (!connection || connection.status !== 'connected')
-                    return;
-                console.log(`MCP Event (${connection.configName} - ${connection.id}): prompts/listChanged received.`);
-                handleListRequest(connection.websocket, connection.id, 'listPrompts', 'promptsList', true);
-            }
-        };
-        const client = new Client({
-            name: "mcp-lab-host",
-            version: "0.1.0",
-            handlers: handlers
+        // Initialize client with required parameters
+        client = new Client({
+            name: "MCP Lab",
+            version: "1.0.0"
         });
+        // Store this connection
         connection = {
             id: connectionId,
-            configName: configName, // Store the config name
+            configName,
             client,
             transport,
             websocket: ws,
-            status: 'connecting',
+            status: 'connecting'
         };
         activeConnections.set(connectionId, connection);
-        console.log(`[Backend] Attempting client.connect for ${configName} (${connectionId})...`);
+        // Connect
+        console.log(`[Backend] Connecting to MCP server at ${command} ${args.join(' ')})`);
         await client.connect(transport);
-        console.log(`[Backend] client.connect(transport) promise RESOLVED for ${configName} (${connectionId}). Waiting for initialized handler...`);
-        // Add notification handler as before
-        client.setNotificationHandler(InitializedNotificationSchema, (notification) => {
-            console.log(`[Backend] setNotificationHandler triggered for 'initialized' event on ${configName} (${connectionId})`);
-            if (!connection)
-                return;
-            if (connection.status === 'connected')
-                return; // Already handled
-            // Add proper null checks and type assertion
-            if (!notification.params) {
-                console.error(`[Backend] Received invalid initialization notification - params missing`);
-                return;
-            }
-            const serverInfo = notification.params.serverInfo;
-            if (!serverInfo) {
-                console.error(`[Backend] Received invalid initialization notification - serverInfo missing`);
-                return;
-            }
-            markConnectionAsConnected(connection, serverInfo);
-        });
-        console.log(`MCP Connection ${configName} (${connectionId}) establishment process initiated.`);
-        // Add a backup mechanism to check if server is ready after a short delay
+        console.log(`[Backend] Connected to server ${configName} (${connectionId}) successfully.`);
+        // This delay ensures the server has time to fully initialize before requesting capabilities
         setTimeout(async () => {
             try {
+                console.log(`[Backend] Initializing MCP client for ${configName} (${connectionId})...`);
+                // Debug log the client structure
+                console.log(`[Debug] Client object structure:`, JSON.stringify(Object.keys(client)));
+                // Use a safer approach to get capabilities
+                const serverCapabilities = [];
+                // Try to get tools capability
+                try {
+                    const toolsResult = await client.listTools();
+                    console.log(`[Debug] Tools result:`, toolsResult);
+                    if (toolsResult && toolsResult.tools) {
+                        serverCapabilities.push('tools');
+                    }
+                }
+                catch (err) {
+                    console.log(`[Debug] Tools not supported:`, err);
+                }
+                // Try to get resources capability
+                try {
+                    const resourcesResult = await client.listResources();
+                    console.log(`[Debug] Resources result:`, resourcesResult);
+                    if (resourcesResult && resourcesResult.resources) {
+                        serverCapabilities.push('resources');
+                    }
+                }
+                catch (err) {
+                    console.log(`[Debug] Resources not supported:`, err);
+                }
+                // Try to get prompts capability
+                try {
+                    const promptsResult = await client.listPrompts();
+                    console.log(`[Debug] Prompts result:`, promptsResult);
+                    if (promptsResult && promptsResult.prompts) {
+                        serverCapabilities.push('prompts');
+                    }
+                }
+                catch (err) {
+                    console.log(`[Debug] Prompts not supported:`, err);
+                }
+                console.log(`[Backend] Successfully initialized MCP client for ${configName} (${connectionId}).`);
+                console.log(`[Backend] Server capabilities:`, serverCapabilities);
+                // Create SimpleServerInfo from server info
+                const serverInfo = {
+                    name: configName,
+                    version: "unknown",
+                    capabilities: serverCapabilities
+                };
                 if (connection && connection.status === 'connecting') {
-                    console.log(`[Backend] Checking server readiness for ${configName} (${connectionId}) via test call...`);
-                    // Try a simple operation to see if the server is responsive
-                    const listResult = await connection.client.listTools();
-                    if (listResult) {
-                        console.log(`[Backend] Server ${configName} (${connectionId}) appears to be ready (listTools succeeded)`);
-                        // Server responded to API call, so it must be ready
-                        if (connection.status === 'connecting') {
-                            console.log(`[Backend] Manually marking connection ${configName} (${connectionId}) as connected`);
-                            // Create a basic server info object if we don't have one
-                            const basicServerInfo = {
-                                name: configName,
-                                version: "1.0.0" // Default version
-                            };
-                            markConnectionAsConnected(connection, basicServerInfo);
-                        }
+                    // Mark this connection as connected
+                    markConnectionAsConnected(connection, serverInfo);
+                    // Log if any capabilities are missing
+                    const expectedCapabilities = ['resources', 'tools', 'prompts'];
+                    const missingCapabilities = expectedCapabilities.filter(cap => !serverInfo.capabilities.includes(cap));
+                    if (missingCapabilities.length > 0) {
+                        console.warn(`[Backend] Server ${configName} is missing capabilities: ${missingCapabilities.join(', ')}`);
+                        sendWsMessage(ws, 'mcpLog', {
+                            connectionId,
+                            message: `Server is missing capabilities: ${missingCapabilities.join(', ')}`
+                        });
+                    }
+                    // No need to request these again as we've already tried them above
+                    // Just update the connection data if we have it
+                    if (serverCapabilities.includes('tools')) {
+                        const toolsResult = await client.listTools();
+                        sendWsMessage(ws, 'toolsList', {
+                            connectionId,
+                            data: { tools: toolsResult.tools }
+                        });
+                    }
+                    if (serverCapabilities.includes('resources')) {
+                        const resourcesResult = await client.listResources();
+                        sendWsMessage(ws, 'resourcesList', {
+                            connectionId,
+                            data: { resources: resourcesResult.resources }
+                        });
+                    }
+                    if (serverCapabilities.includes('prompts')) {
+                        const promptsResult = await client.listPrompts();
+                        sendWsMessage(ws, 'promptsList', {
+                            connectionId,
+                            data: { prompts: promptsResult.prompts }
+                        });
                     }
                 }
             }
             catch (error) {
-                console.log(`[Backend] Test call to check server readiness failed for ${configName} (${connectionId}): ${error}`);
-                // If test call fails, assume connection failed
+                console.error(`MCP capabilities request failed for ${configName} (${connectionId}):`, error);
                 if (connection && connection.status === 'connecting') {
                     connection.status = 'error';
                     sendWsMessage(ws, 'connectionStatus', {
@@ -489,7 +459,7 @@ async function handleConnectStdio(ws, command, args, configName, configCwd) {
                         status: 'error',
                         error: error instanceof Error ? error.message : String(error)
                     });
-                    console.error(`[Backend] Connection failed for ${configName} (${connectionId}) - test call failed.`);
+                    console.error(`[Backend] Connection failed for ${configName} (${connectionId}) - capabilities request failed.`);
                     // Clean up? Client might close itself.
                     // activeConnections.delete(connectionId);
                 }

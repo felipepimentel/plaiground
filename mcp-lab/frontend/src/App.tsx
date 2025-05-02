@@ -91,8 +91,17 @@ const statusIndicator = {
 // Cards
 const cardClass = `bg-white ${panelShadow} ${panelRounded} border ${colors.secondary.border} overflow-hidden`;
 
-// --- REVISED ServerSelector ---
+// --- Helper function to get status details ---
+const getStatusDetails = (status: ServerConnection['status']) => {
+    switch (status) {
+        case 'connected': return { class: 'status-connected', icon: 'fas fa-check-circle', text: 'Connected' };
+        case 'connecting': return { class: 'status-connecting', icon: 'fas fa-sync fa-spin', text: 'Connecting' };
+        case 'error': return { class: 'status-error', icon: 'fas fa-exclamation-triangle', text: 'Error' };
+        default: return { class: 'status-disconnected', icon: 'fas fa-plug', text: 'Disconnected' };
+    }
+};
 
+// --- Server Selector Component ---
 function ServerSelector() {
     const { sendMessage, isConnected } = useWebSocket();
     const { configuredServers, connections, activeServerId, setActiveServer } = useStore();
@@ -126,17 +135,24 @@ function ServerSelector() {
         });
     }, [configuredServers, connections, handleConnect]);
 
-    // When a server connects, request its tools list
+    // Auto-request tools, resources, and prompts upon connection
     useEffect(() => {
-        connections.forEach(conn => {
-            if (conn.status === 'connected' && !conn.tools) {
-                console.log(`[Frontend] Auto-requesting tools for server ${conn.id} (${conn.name})`);
-                sendMessage({ type: 'getTools', payload: { connectionId: conn.id } });
-            }
+        const connectedNeedsLoad = connections.filter(conn =>
+            conn.status === 'connected' && (!conn.tools || !conn.resources || !conn.prompts)
+        );
+
+        if (connectedNeedsLoad.length === 0) return;
+
+        connectedNeedsLoad.forEach((conn, index) => {
+            setTimeout(() => {
+                console.log(`[Frontend] Auto-requesting capabilities for server ${conn.id} (${conn.name})`);
+                if (!conn.tools) sendMessage({ type: 'getTools', payload: { connectionId: conn.id } });
+                if (!conn.resources) sendMessage({ type: 'getResources', payload: { connectionId: conn.id } });
+                if (!conn.prompts) sendMessage({ type: 'getPrompts', payload: { connectionId: conn.id } });
+            }, index * 500); // Slightly faster interval
         });
     }, [connections, sendMessage]);
 
-    // Derive a combined list for rendering
     const serverList = useMemo(() => {
         return configuredServers.map(config => {
             const activeConn = connections.find(c => c.name === config.name);
@@ -151,92 +167,98 @@ function ServerSelector() {
         });
     }, [configuredServers, connections]);
 
-    // Helper function to get status indicator class
-    const getStatusClass = (status: ServerConnection['status']) => {
-        switch (status) {
-            case 'connected': return 'status-connected';
-            case 'connecting': return 'status-connecting';
-            case 'error': return 'status-error';
-            default: return 'status-disconnected';
-        }
-    };
-
     return (
         <div className="server-sidebar">
             <div className="sidebar-header">
                 <div className="sidebar-header-content">
-                    <h3 className="sidebar-title">Servers</h3>
-                    <button
-                        onClick={handleConnectAll}
-                        className="btn btn-connect-all"
-                        disabled={!isConnected || configuredServers.length === 0}
-                    >
-                        + Connect All
-                    </button>
-                </div>
+                    <h3 className="sidebar-title">
+                        <i className="fas fa-server icon"></i> <span>Servers</span>
+                    </h3>
 
-                {!isConnected && (
-                    <div className="websocket-disconnected">
-                        ⚠️ WebSocket disconnected
+                    <div className="sidebar-actions">
+                        <button
+                            onClick={handleConnectAll}
+                            className="btn btn-xs btn-connect-all"
+                            disabled={!isConnected || configuredServers.length === 0}
+                            title="Connect to all disconnected servers"
+                        >
+                            <i className="fas fa-plug"></i> <span>Connect All</span>
+                        </button>
                     </div>
-                )}
+
+                    {!isConnected && (
+                        <div className="websocket-disconnected">
+                            <i className="fas fa-exclamation-circle"></i>
+                            <span>WebSocket disconnected</span>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <ul className="server-list scrollbar-thin">
                 {serverList.length === 0 ? (
                     <div className="server-list-empty">
-                        No servers configured
+                        <i className="fas fa-info-circle mr-2"></i>
+                        <span>No servers configured</span>
                     </div>
                 ) : (
                     serverList.map((server) => {
                         const isActive = server.connectionId === activeServerId;
                         const canBeActive = server.connectionId && server.status === 'connected';
+                        const statusDetails = getStatusDetails(server.status);
 
                         return (
-                            <li key={server.name} className={`server-item ${isActive ? 'active' : ''}`}>
-                                <div
-                                    className="server-item-header"
-                                    onClick={() => canBeActive && setActiveServer(server.connectionId)}
-                                >
-                                    <span className={`status-indicator ${getStatusClass(server.status)}`}></span>
-                                    <span className="server-name">
-                                        {server.name}
+                            <li key={server.name}
+                                className={`server-item ${isActive ? 'active' : ''} ${canBeActive ? 'can-activate' : ''}`}
+                                onClick={() => canBeActive && setActiveServer(server.connectionId)}
+                                title={`Select server ${server.name}`}
+                            >
+                                <div className="server-item-header">
+                                    <span className={`status-indicator ${statusDetails.class}`}></span>
+                                    <span className="server-icon">
+                                        <i className={statusDetails.icon}></i>
                                     </span>
+                                    <span className="server-name">{server.name}</span>
                                 </div>
 
                                 {server.description && (
                                     <div className="server-description">
-                                        {server.description}
+                                        <i className="fas fa-info-circle text-gray-400"></i> {server.description}
                                     </div>
                                 )}
 
                                 {server.status === 'connecting' && (
-                                    <div className="server-description text-warning">
-                                        Connecting...
+                                    <div className="server-description text-amber-600">
+                                        <i className="fas fa-spinner fa-spin"></i> Connecting...
                                     </div>
                                 )}
 
                                 {server.status === 'error' && (
                                     <div className="server-error">
-                                        Connection error
+                                        <i className="fas fa-exclamation-triangle"></i> Connection error
                                     </div>
                                 )}
 
                                 <div className="server-actions">
                                     {server.status === 'connected' || server.status === 'connecting' ? (
                                         <button
-                                            onClick={() => server.connectionId && handleDisconnect(server.connectionId)}
+                                            onClick={(e) => { e.stopPropagation(); server.connectionId && handleDisconnect(server.connectionId); }}
                                             className="btn btn-sm btn-disconnect"
                                             disabled={server.status === 'connecting'}
+                                            title={`Disconnect from ${server.name}`}
                                         >
-                                            {server.status === 'connecting' ? 'Connecting...' : 'Disconnect'}
+                                            <i className="fas fa-times-circle"></i>
+                                            <span>{server.status === 'connecting' ? 'Connecting...' : 'Disconnect'}</span>
                                         </button>
                                     ) : (
                                         <button
-                                            onClick={() => handleConnect(server.name)}
+                                            onClick={(e) => { e.stopPropagation(); handleConnect(server.name); }}
                                             className="btn btn-sm btn-connect"
+                                            disabled={!isConnected}
+                                            title={`Connect to ${server.name}`}
                                         >
-                                            Connect
+                                            <i className="fas fa-plug"></i>
+                                            <span>Connect</span>
                                         </button>
                                     )}
                                 </div>
@@ -249,533 +271,422 @@ function ServerSelector() {
     );
 }
 
+// --- Navigation Component ---
 function Navigation() {
-    const { activeServerId, setActiveView, activeView } = useStore();
-    const { sendMessage, isConnected } = useWebSocket();
-    const isConnectedAndActive = useStore(state => {
-        const conn = state.connections.find(c => c.id === state.activeServerId);
-        return conn?.status === 'connected';
-    });
-    const isDisabled = !activeServerId || !isConnectedAndActive;
+    const { activeServerId, activeView, setActiveView, connections } = useStore();
+    const activeConnection = connections.find(conn => conn.id === activeServerId);
+    const isServerConnected = activeConnection?.status === 'connected';
 
-    const views = [
-        { id: 'Resources', icon: '📁' },
-        { id: 'Tools', icon: '🔧' },
-        { id: 'Prompts', icon: '💬' },
-        { id: 'Messages', icon: '📨' }
+    // Define base navigation items
+    const navItemsConfig = [
+        { id: 'Resources' as ActiveView, label: 'Resources', icon: 'fas fa-database' },
+        { id: 'Tools' as ActiveView, label: 'Tools', icon: 'fas fa-tools' },
+        { id: 'Prompts' as ActiveView, label: 'Prompts', icon: 'fas fa-comment-dots' },
+        { id: 'Messages' as ActiveView, label: 'Messages', icon: 'fas fa-envelope' },
     ];
 
-    // We don't need to request data here - we'll do it on initial view selection only
-    const handleViewSelect = useCallback((viewId: ActiveView) => {
-        if (isDisabled) return;
-        setActiveView(viewId);
-    }, [isDisabled, setActiveView]);
+    // Determine disabled state based on connection status and capabilities
+    const navItems = navItemsConfig.map(item => {
+        let disabled = !isServerConnected; // Disabled if server not connected
+        if (isServerConnected && activeConnection) {
+            if (item.id === 'Tools' && activeConnection.tools === undefined) disabled = true;
+            if (item.id === 'Prompts' && activeConnection.prompts === undefined) disabled = true;
+            // Resources and Messages are always enabled if connected
+        }
+        // Keep item always visible, just control disabled state
+        return { ...item, disabled };
+    });
+
+    const isLoadingCapabilities = useMemo(() => {
+        if (!isServerConnected || !activeConnection) return false;
+        return activeConnection.tools === undefined ||
+            activeConnection.resources === undefined ||
+            activeConnection.prompts === undefined;
+    }, [activeConnection, isServerConnected]);
 
     return (
-        <div className="navigation">
+        <div className={`navigation ${!activeServerId ? 'navigation-disabled' : ''}`}>
             <div className="nav-header">
-                Explore
+                <h3 className="sidebar-title">
+                    <i className="fas fa-compass"></i> <span>Explore</span>
+                </h3>
             </div>
+            <ul className="nav-menu">
+                {navItems.map((item) => (
+                    <li
+                        key={item.id}
+                        className={`nav-item ${activeView === item.id && !item.disabled ? 'active' : ''} ${item.disabled ? 'disabled' : 'cursor-pointer'}`}
+                        onClick={() => !item.disabled && setActiveView(item.id)}
+                        title={item.disabled ? (activeServerId ? 'Capability not available' : 'Select a connected server') : item.label}
+                    >
+                        <span className="nav-item-icon"><i className={item.icon}></i></span>
+                        <span>{item.label}</span>
+                    </li>
+                ))}
+            </ul>
 
-            <div className="nav-menu">
-                {views.map((view) => {
-                    const viewIsActive = activeView === view.id && !isDisabled;
-
-                    return (
-                        <div
-                            key={view.id}
-                            onClick={() => handleViewSelect(view.id as any)}
-                            className={`nav-item ${viewIsActive ? 'active' : ''} ${isDisabled ? 'disabled' : ''}`}
-                        >
-                            <span className="nav-item-icon">{view.icon}</span>
-                            {view.id}
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
-function MainContentArea() {
-    const { connections, activeServerId, activeView } = useStore();
-    const { sendMessage } = useWebSocket();
-    const [toolParams, setToolParams] = useState<Record<string, Record<string, string>>>({});
-    const [isExecuting, setIsExecuting] = useState<Record<string, boolean>>({});
-    const [toolsLoadingTimeout, setToolsLoadingTimeout] = useState(false);
-    const [dataRequested, setDataRequested] = useState<Record<string, boolean>>({});
-    const [manuallyRequestedTool, setManuallyRequestedTool] = useState(false);
-
-    const activeConnection = useMemo(() => {
-        return connections.find(c => c.id === activeServerId);
-    }, [connections, activeServerId]);
-
-    // Load data when view or server changes
-    useEffect(() => {
-        // Skip if no connection or not connected
-        if (!activeServerId || !activeView || !activeConnection || activeConnection.status !== 'connected') {
-            return;
-        }
-
-        // Skip if we've already requested this data for this server+view combination
-        const requestKey = `${activeServerId}-${activeView}`;
-        if (dataRequested[requestKey]) {
-            return;
-        }
-
-        // Mark this data as requested
-        setDataRequested(prev => ({
-            ...prev,
-            [requestKey]: true
-        }));
-
-        // Request the appropriate data
-        switch (activeView) {
-            case 'Resources':
-                console.log(`[Frontend] Requesting resources for server ${activeServerId}`);
-                sendMessage({ type: 'getResources', payload: { connectionId: activeServerId } });
-                break;
-            case 'Tools':
-                console.log(`[Frontend] Requesting tools for server ${activeServerId}`);
-                sendMessage({ type: 'getTools', payload: { connectionId: activeServerId } });
-                break;
-            case 'Prompts':
-                console.log(`[Frontend] Requesting prompts for server ${activeServerId}`);
-                sendMessage({ type: 'getPrompts', payload: { connectionId: activeServerId } });
-                break;
-            default:
-                break;
-        }
-    }, [activeServerId, activeView, activeConnection, sendMessage]);
-
-    // Set a timeout for tools loading
-    useEffect(() => {
-        if (activeView === 'Tools' && activeConnection?.tools === undefined) {
-            // If tools are undefined for more than 5 seconds, show the timeout UI
-            const timeoutId = setTimeout(() => {
-                setToolsLoadingTimeout(true);
-            }, 5000);
-
-            return () => {
-                clearTimeout(timeoutId);
-                setToolsLoadingTimeout(false);
-            };
-        }
-    }, [activeView, activeConnection?.tools]);
-
-    // Card styling for content items
-    const cardClass = "bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden";
-
-    // Handle parameter input change
-    const handleParamChange = useCallback((toolName: string, paramName: string, value: string) => {
-        setToolParams(prev => ({
-            ...prev,
-            [toolName]: {
-                ...(prev[toolName] || {}),
-                [paramName]: value
-            }
-        }));
-    }, []);
-
-    // Execute a tool
-    const executeTool = useCallback(async (toolName: string) => {
-        if (!activeServerId) return;
-
-        const params = toolParams[toolName] || {};
-
-        setIsExecuting(prev => ({ ...prev, [toolName]: true }));
-
-        try {
-            // Send tool call using MCP format
-            const mcpToolCall = {
-                jsonrpc: "2.0",
-                id: Math.floor(Math.random() * 10000),
-                method: "tools/call",
-                params: {
-                    name: toolName,
-                    arguments: params
-                }
-            };
-            console.log('[Frontend] Executing tool using MCP format:', mcpToolCall);
-            sendMessage(mcpToolCall);
-        } catch (err) {
-            console.error(`Error executing tool ${toolName}:`, err);
-        }
-
-        // Reset executing state after a delay to show feedback
-        setTimeout(() => {
-            setIsExecuting(prev => ({ ...prev, [toolName]: false }));
-        }, 1000);
-    }, [activeServerId, sendMessage, toolParams]);
-
-    if (!activeConnection) {
-        return (
-            <div className="main-area">
-                <div className="no-server-selected">
-                    <div className="placeholder-icon">+</div>
-                    <h3 className="placeholder-title">No Server Selected</h3>
-                    <p className="placeholder-text">
-                        Select a connected server from the list to explore its resources, tools, prompts, and messages.
-                    </p>
+            {isLoadingCapabilities && (
+                <div className="nav-warning" title="Loading server capabilities">
+                    <i className="fas fa-spinner fa-spin"></i> Loading...
                 </div>
-            </div>
-        );
-    }
+            )}
 
-    if (activeConnection.status !== 'connected') {
-        return (
-            <div className="main-area">
-                <div className="no-server-selected">
-                    <h3 className="placeholder-title">Server Not Connected</h3>
-                    <p className="placeholder-text">The selected server is currently {activeConnection.status}.</p>
-                </div>
-            </div>
-        );
-    }
-
-    // Render content based on activeView
-    const renderContent = () => {
-        switch (activeView) {
-            case 'Tools':
-                console.log('[Frontend] Rendering Tools view, tools state:',
-                    activeConnection.tools === undefined ? 'undefined' :
-                        (activeConnection.tools.length === 0 ? 'empty array' :
-                            `array with ${activeConnection.tools.length} items`));
-
-                // Tools are fetched but empty
-                if (activeConnection.tools !== undefined && activeConnection.tools.length === 0) {
-                    return (
-                        <div className="content-placeholder">
-                            <div className="flex flex-col items-center justify-center p-6">
-                                <div className="text-center mb-4">
-                                    <h3 className="text-amber-600 font-medium mb-2">
-                                        No tools available for this server
-                                    </h3>
-                                    <p className="text-gray-600 text-sm mb-4">
-                                        This server doesn't have any tools defined or the tools list is empty.
-                                    </p>
-                                    <div className="rounded-md bg-gray-50 p-4 text-left">
-                                        <h4 className="text-sm font-medium mb-2">Server Information:</h4>
-                                        <ul className="text-xs text-gray-600 space-y-1">
-                                            <li><span className="font-medium">Name:</span> {activeConnection.name}</li>
-                                            <li><span className="font-medium">ID:</span> {activeConnection.id}</li>
-                                            {activeConnection.serverInfo && (
-                                                <>
-                                                    <li><span className="font-medium">Server Name:</span> {activeConnection.serverInfo.name}</li>
-                                                    <li><span className="font-medium">Version:</span> {activeConnection.serverInfo.version}</li>
-                                                </>
-                                            )}
-                                        </ul>
-                                    </div>
-                                </div>
-
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={() => {
-                                        if (activeServerId) {
-                                            console.log('[Frontend] Manually re-requesting tools after empty result');
-                                            // Use standard MCP format with JSON-RPC 2.0
-                                            const mcpMessage = {
-                                                jsonrpc: "2.0",
-                                                id: Math.floor(Math.random() * 10000),
-                                                method: "tools/list",
-                                                params: {}
-                                            };
-                                            console.log('[Frontend] Sending standard MCP format for tools:', mcpMessage);
-                                            sendMessage(mcpMessage);
-                                        }
-                                    }}
-                                >
-                                    Try Again
-                                </button>
-                            </div>
-                        </div>
-                    );
-                }
-
-                // Tools are still being fetched
-                if (activeConnection.tools === undefined) {
-                    console.log('[Frontend] Tools are undefined, showing loading state');
-
-                    // Get raw WebSocket messages for debugging
-                    const rawMessages = activeConnection.rawWsMessages || [];
-                    const toolsRelatedMessages = rawMessages.filter(msg => {
-                        try {
-                            const data = JSON.parse(msg.data);
-                            return data.method === 'tools/list' ||
-                                data.result?.tools !== undefined ||
-                                data.type === 'getTools' ||
-                                data.type === 'toolsList';
-                        } catch {
-                            return false;
-                        }
-                    });
-
-                    return (
-                        <div className="content-placeholder">
-                            <div className="flex flex-col items-center justify-center p-6">
-                                <div className="loading-spinner mb-4"></div>
-                                {toolsLoadingTimeout ? (
-                                    <div className="text-center mb-4">
-                                        <p className="text-amber-600 font-medium mb-2">
-                                            Tools are taking longer than expected to load.
-                                        </p>
-                                        <p className="text-gray-600 text-sm mb-2">
-                                            This might be due to one of the following reasons:
-                                        </p>
-                                        <ul className="text-sm text-left text-gray-600 mb-4">
-                                            <li>• The server doesn't support tools</li>
-                                            <li>• The connection is experiencing issues</li>
-                                            <li>• The backend is still processing</li>
-                                        </ul>
-                                    </div>
-                                ) : (
-                                    <p className="mb-4">Loading tools...</p>
-                                )}
-
-                                <div className="flex space-x-2 mb-4">
-                                    <button
-                                        className="btn btn-primary"
-                                        onClick={() => {
-                                            console.log('[Frontend] Manually requesting tools for', activeServerId);
-                                            setToolsLoadingTimeout(false); // Reset timeout on manual reload
-                                            setManuallyRequestedTool(true); // Set flag to prevent auto-retry
-                                            if (activeServerId) {
-                                                // Use standard MCP format with JSON-RPC 2.0 specification
-                                                sendMessage({
-                                                    jsonrpc: "2.0",
-                                                    id: Math.floor(Math.random() * 10000),
-                                                    method: "tools/list",
-                                                    params: {}
-                                                });
-                                            }
-                                        }}
-                                    >
-                                        Reload Tools
-                                    </button>
-
-                                    {toolsLoadingTimeout && (
-                                        <button
-                                            className="btn btn-secondary"
-                                            onClick={() => {
-                                                console.log('[Frontend] Assuming server has no tools');
-                                                // Manually update the store to show empty tools array
-                                                useStore.getState().setTools(activeServerId!, []);
-                                            }}
-                                        >
-                                            Assume No Tools
-                                        </button>
-                                    )}
-                                </div>
-
-                                {toolsLoadingTimeout && toolsRelatedMessages.length > 0 && (
-                                    <div className="mt-6 w-full max-w-2xl">
-                                        <h4 className="text-sm font-medium mb-2 text-gray-700 border-b pb-1">Debug Information</h4>
-                                        <div className="bg-gray-50 p-3 rounded text-xs font-mono overflow-x-auto max-h-64 overflow-y-auto">
-                                            {toolsRelatedMessages.length === 0 ? (
-                                                <p className="text-gray-500 italic">No tools-related messages found</p>
-                                            ) : (
-                                                toolsRelatedMessages.map((msg, idx) => {
-                                                    try {
-                                                        const parsed = JSON.parse(msg.data);
-                                                        return (
-                                                            <div key={idx} className="mb-2 pb-2 border-b border-gray-200 last:border-0">
-                                                                <div className={`font-bold ${msg.direction === 'send' ? 'text-blue-600' : 'text-green-600'}`}>
-                                                                    [{new Date(msg.timestamp).toLocaleTimeString()}]
-                                                                    {msg.direction === 'send' ? ' ➡️ SENT:' : ' ⬅️ RECEIVED:'}
-                                                                </div>
-                                                                <pre className="mt-1 whitespace-pre-wrap break-all">
-                                                                    {JSON.stringify(parsed, null, 2)}
-                                                                </pre>
-                                                            </div>
-                                                        );
-                                                    } catch {
-                                                        return null;
-                                                    }
-                                                })
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                }
-
-                // If we have tools, display them
-                if (activeConnection.tools && activeConnection.tools.length > 0) {
-                    console.log('[Frontend] Rendering tools list:', activeConnection.tools);
-
-                    return (
-                        <div className="tools-container">
-                            {activeConnection.tools.map((tool) => (
-                                <div key={tool.name} className={`${cardClass} mb-4`}>
-                                    <div className="p-4">
-                                        <h3 className="text-lg font-semibold mb-2">{tool.name}</h3>
-                                        {tool.description && (
-                                            <p className="text-sm text-gray-600 mb-3">{tool.description}</p>
-                                        )}
-
-                                        {tool.parameters && (
-                                            <div className="mb-4">
-                                                <h4 className="text-sm font-medium mb-2">Parameters:</h4>
-                                                {Object.entries(tool.parameters.properties).map(([name, schema]) => (
-                                                    <div key={name} className="mb-3">
-                                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                            {name}
-                                                            {tool.parameters?.required?.includes(name) && (
-                                                                <span className="text-red-500 ml-1">*</span>
-                                                            )}
-                                                        </label>
-                                                        <input
-                                                            type="text"
-                                                            className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                                            placeholder={schema.description || ''}
-                                                            value={toolParams[tool.name]?.[name] || ''}
-                                                            onChange={(e) => handleParamChange(tool.name, name, e.target.value)}
-                                                        />
-                                                        {schema.description && (
-                                                            <p className="mt-1 text-xs text-gray-500">{schema.description}</p>
-                                                        )}
-                                                    </div>
-                                                ))}
-
-                                                <button
-                                                    className="btn btn-primary mt-3"
-                                                    onClick={() => executeTool(tool.name)}
-                                                    disabled={isExecuting[tool.name]}
-                                                >
-                                                    {isExecuting[tool.name] ? (
-                                                        <>
-                                                            <span className="loading-spinner sm mr-2"></span>
-                                                            Executing...
-                                                        </>
-                                                    ) : 'Execute Tool'}
-                                                </button>
-                                            </div>
-                                        )}
-
-                                        {activeConnection.lastToolResult?.toolName === tool.name && (
-                                            <div className="mt-4">
-                                                <h4 className="text-sm font-medium mb-2">Result:</h4>
-                                                <div className="text-sm bg-gray-50 p-3 rounded-md border border-gray-200 font-mono whitespace-pre-wrap overflow-x-auto">
-                                                    {activeConnection.lastToolResult.error ? (
-                                                        <div className="text-red-600">
-                                                            Error: {activeConnection.lastToolResult.error}
-                                                        </div>
-                                                    ) : (
-                                                        <div>
-                                                            {typeof activeConnection.lastToolResult.result === 'object'
-                                                                ? JSON.stringify(activeConnection.lastToolResult.result, null, 2)
-                                                                : String(activeConnection.lastToolResult.result)}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    );
-                }
-                break;
-
-            case 'Resources':
-                // Render resources when implemented
-                break;
-
-            case 'Prompts':
-                // Render prompts when implemented
-                break;
-
-            case 'Messages':
-                // Render messages when implemented
-                break;
-
-            default:
-                break;
-        }
-
-        // Default placeholder
-        return (
-            <div className="content-placeholder">
-                <p>
-                    This area will display {activeView?.toLowerCase()} when implemented.
-                </p>
-            </div>
-        );
-    };
-
-    return (
-        <div className="main-area">
-            <div className="main-area-header">
-                <h2 className="main-area-title">
-                    {activeView} for {activeConnection.name}
-                </h2>
-            </div>
-            {renderContent()}
-        </div>
-    );
-}
-
-function StatusBar() {
-    const { isConnected } = useWebSocket();
-    const connections = useStore(state => state.connections);
-
-    const connectedCount = useMemo(() =>
-        connections.filter(c => c.status === 'connected').length,
-        [connections]
-    );
-
-    return (
-        <div className="top-status-bar">
-            <div className="top-status-item">
-                <span className="top-status-indicator top-status-connected"></span>
-                <span>WebSocket: Connected</span>
-            </div>
-            {connectedCount > 0 && (
-                <div className="top-status-item">
-                    <span className="top-status-indicator top-status-connected"></span>
-                    <span>Servers: {connectedCount} connected</span>
+            {!activeServerId && (
+                <div className="nav-disabled-message">
+                    <i className="fas fa-info-circle"></i> Select a connected server to explore.
                 </div>
             )}
         </div>
     );
 }
 
-function App() {
-    const { activeServerId } = useStore();
+// Improved No Server Selected Placeholder
+function NoServerSelectedPlaceholder() {
+    return (
+        <div className="no-server-selected">
+            <div className="no-server-icon">
+                <i className="fas fa-server"></i>
+            </div>
+            <div className="no-server-content">
+                <h2 className="no-server-title">No Server Selected</h2>
+                <p className="no-server-text">
+                    Connect to or select a server from the sidebar to begin exploring available resources and tools.
+                </p>
+                <div className="no-server-instruction">
+                    <div className="instruction-step">
+                        <div className="step-number">1</div>
+                        <div className="step-text">
+                            <strong>Connect</strong> to a server using the buttons in the sidebar
+                        </div>
+                    </div>
+                    <div className="instruction-step">
+                        <div className="step-number">2</div>
+                        <div className="step-text">
+                            <strong>Select</strong> the server to explore its capabilities
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// --- Main Content Area Component ---
+function MainContentArea() {
+    const { activeServerId, activeView, connections } = useStore();
+    const activeConnection = connections.find(conn => conn.id === activeServerId);
+
+    const renderPlaceholder = (icon: string, title: string, text: string, extraContent?: React.ReactNode) => (
+        <div className="content-placeholder">
+            <i className={`${icon} placeholder-icon`}></i>
+            <h3 className="placeholder-title">{title}</h3>
+            <p className="placeholder-text">{text}</p>
+            {extraContent}
+        </div>
+    );
+
+    // Content for resources view
+    const renderResourcesContent = useCallback(() => {
+        if (!activeConnection) return null; // Should not happen if view is active
+
+        if (activeConnection.resources === undefined) {
+            return renderPlaceholder("fas fa-spinner fa-spin", "Loading Resources", "Fetching available resources from the server...");
+        }
+        if (activeConnection.resources.length === 0) {
+            return renderPlaceholder("fas fa-box-open", "No Resources", "This server does not expose any resources."); // Changed icon
+        }
+
+        return (
+            <div className="resource-list">
+                {activeConnection.resources.map((resource) => (
+                    <div key={resource.uri} className="resource-item">
+                        <div className="resource-item-header">
+                            <i className={`fas fa-${resource.mimeType?.includes('text') ? 'file-alt' : 'file-code'}`}></i> {/* Icon based on type */}
+                            <h3 className="resource-name">{resource.name}</h3>
+                        </div>
+                        <div className="resource-meta">
+                            <span className="resource-type">{resource.mimeType || 'unknown type'}</span>
+                            <span className="resource-uri" title={resource.uri}>{resource.uri}</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    }, [activeConnection]);
+
+    // Content for tools view
+    const renderToolsContent = useCallback(() => {
+        if (!activeConnection) return null;
+
+        if (activeConnection.tools === undefined) {
+            return renderPlaceholder("fas fa-spinner fa-spin", "Loading Tools", "Fetching available tools from the server...");
+        }
+        if (activeConnection.tools.length === 0) {
+            return renderPlaceholder("fas fa-toolbox", "No Tools", "This server does not provide any tools."); // Changed icon
+        }
+
+        return (
+            <div className="tools-list">
+                {activeConnection.tools.map((tool) => (
+                    <div key={tool.name} className="tool-item">
+                        <div className="tool-item-header">
+                            <i className="fas fa-wrench"></i>
+                            <h3 className="tool-name">{tool.name}</h3>
+                        </div>
+                        <p className="tool-description">{tool.description}</p>
+                        {/* TODO: Add capability to interact with tools */}
+                    </div>
+                ))}
+            </div>
+        );
+    }, [activeConnection]);
+
+    // Content for prompts view
+    const renderPromptsContent = useCallback(() => {
+        if (!activeConnection) return null;
+
+        if (activeConnection.prompts === undefined) {
+            return renderPlaceholder("fas fa-spinner fa-spin", "Loading Prompts", "Fetching available prompts from the server...");
+        }
+        if (activeConnection.prompts.length === 0) {
+            return renderPlaceholder("fas fa-comments", "No Prompts", "This server does not offer any prompts."); // Changed icon
+        }
+
+        return (
+            <div className="prompt-container">
+                <div className="prompts-grid">
+                    {activeConnection.prompts.map((prompt) => (
+                        <div key={prompt.name} className="prompt-box">
+                            <div className="prompt-header">
+                                <i className="fas fa-comment-alt"></i> {/* Changed icon */}
+                                <h3 className="prompt-title">{prompt.name}</h3>
+                            </div>
+                            <p className="prompt-description">{prompt.description}</p>
+
+                            {prompt.arguments && prompt.arguments.length > 0 && (
+                                <div className="prompt-arguments">
+                                    <div className="prompt-arguments-header">
+                                        <i className="fas fa-list-ul"></i> Arguments:
+                                    </div>
+                                    <ul className="prompt-arguments-list">
+                                        {prompt.arguments.map((arg, index) => (
+                                            <li key={index} className="prompt-argument-item">
+                                                <span className="prompt-argument-name">{arg.name}</span>
+                                                <span className="prompt-argument-type">{arg.type}</span>
+                                                {arg.description && <span className="prompt-argument-description">- {arg.description}</span>} {/* Added hyphen */}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {/* TODO: Add capability to interact with prompts */}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }, [activeConnection]);
+
+    // Content for messages view
+    const renderMessagesContent = useCallback(() => {
+        if (!activeConnection) return null;
+
+        const clearMessages = () => {
+            console.log('[Frontend] Clearing logs for connection:', activeServerId);
+            useStore.getState().clearLogs(activeServerId || '');
+        };
+
+        return (
+            <div className="messages-container">
+                {activeConnection.rawWsMessages && activeConnection.rawWsMessages.length > 0 ? (
+                    <div className="messages-list scrollbar-thin">
+                        {activeConnection.rawWsMessages.map((message, idx) => (
+                            <div key={idx} className={`message-item ${message.direction === 'send' ? 'message-outgoing' : 'message-incoming'}`}>
+                                <div className="message-header">
+                                    <span className="message-direction">
+                                        {message.direction === 'send' ? (
+                                            <><i className="fas fa-arrow-up text-blue-500"></i> Sent</> // Changed icon/color
+                                        ) : (
+                                            <><i className="fas fa-arrow-down text-green-500"></i> Received</> // Changed icon/color
+                                        )}
+                                    </span>
+                                    <span className="message-timestamp">
+                                        <i className="far fa-clock"></i> {new Date(message.timestamp).toLocaleTimeString()}
+                                    </span>
+                                </div>
+                                <pre className="message-content scrollbar-thin">{JSON.stringify(message.data, null, 2)}</pre>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    renderPlaceholder("fas fa-comment-slash", "No Messages", "No messages recorded for this connection yet.") // Changed icon
+                )}
+
+                <div className="messages-actions">
+                    <button className="btn btn-sm btn-secondary" onClick={clearMessages} title="Clear all messages for this session" disabled={!activeConnection.rawWsMessages || activeConnection.rawWsMessages.length === 0}>
+                        <i className="fas fa-trash-alt"></i> <span>Clear Messages</span>
+                    </button>
+                </div>
+            </div>
+        );
+    }, [activeConnection, activeServerId]);
+
+    const renderContent = () => {
+        if (!activeServerId) {
+            return <NoServerSelectedPlaceholder />;
+        }
+
+        if (!activeConnection) {
+            return renderPlaceholder("fas fa-question-circle", "Error", "Could not find details for the selected server.");
+        }
+
+        const statusDetails = getStatusDetails(activeConnection.status);
+
+        if (activeConnection.status !== 'connected') {
+            const errorContent = activeConnection.status === 'error' && activeConnection.lastError ? (
+                <div className="error-container mt-4">
+                    <div className="error-icon"><i className="fas fa-exclamation-circle"></i></div>
+                    <div className="error-content">
+                        <div className="error-title">Connection Error</div>
+                        <pre className="error-message">{activeConnection.lastError}</pre>
+                    </div>
+                </div>
+            ) : null;
+
+            return renderPlaceholder(statusDetails.icon, `Server ${statusDetails.text}`, `The selected server (${activeConnection.name}) is currently ${activeConnection.status}.`, errorContent);
+        }
+
+        // Render view content
+        switch (activeView) {
+            case 'Resources': return renderResourcesContent();
+            case 'Tools': return renderToolsContent();
+            case 'Prompts': return renderPromptsContent();
+            case 'Messages': return renderMessagesContent();
+            default:
+                // If connected but no view selected, default to Resources if available, else show placeholder
+                if (activeConnection.resources !== undefined) {
+                    // Use a slight delay to allow store update to propagate if needed
+                    setTimeout(() => useStore.getState().setActiveView('Resources'), 0);
+                    return renderPlaceholder("fas fa-spinner fa-spin", "Loading", "Loading default view...");
+                } else {
+                    return renderPlaceholder("fas fa-compass", "Select a View", "Choose a view from the navigation menu to explore capabilities.");
+                }
+        }
+    };
+
+    const getHeaderDetails = () => {
+        if (!activeConnection || activeConnection.status !== 'connected' || !activeView) {
+            return { icon: null, title: null, count: null };
+        }
+        let icon = null, title = activeView, count: number | undefined = undefined;
+        switch (activeView) {
+            case 'Resources':
+                icon = "fas fa-database";
+                count = activeConnection.resources?.length;
+                break;
+            case 'Tools':
+                icon = "fas fa-tools";
+                count = activeConnection.tools?.length;
+                break;
+            case 'Prompts':
+                icon = "fas fa-comment-dots";
+                count = activeConnection.prompts?.length;
+                break;
+            case 'Messages':
+                icon = "fas fa-envelope";
+                count = activeConnection.rawWsMessages?.length;
+                break;
+        }
+        return { icon, title, count };
+    }
+    const headerDetails = getHeaderDetails();
 
     return (
-        <div className="app-container">
-            {/* Header */}
+        <div className="main-area">
+            {activeConnection?.status === 'connected' && activeView && (
+                <div className="main-area-header">
+                    <h2 className="main-area-title">
+                        {headerDetails.icon && <i className={`${headerDetails.icon} text-primary-500`}></i>}
+                        <span>{headerDetails.title}</span>
+                        <span className="server-pill">
+                            <i className="fas fa-server"></i> {activeConnection.name}
+                        </span>
+                        {headerDetails.count !== undefined && (
+                            <span className="counter">{headerDetails.count}</span>
+                        )}
+                    </h2>
+                </div>
+            )}
+            <div className="main-area-content scrollbar-thin">
+                {renderContent()}
+            </div>
+        </div>
+    );
+}
+
+// --- App Component (Root) ---
+function App() {
+    const { isConnected } = useWebSocket();
+    const { connections } = useStore();
+    const [isDarkMode, setIsDarkMode] = useState(() => {
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) return savedTheme === 'dark';
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    });
+
+    useEffect(() => {
+        document.documentElement.classList.toggle('dark-mode', isDarkMode);
+        document.documentElement.classList.toggle('light-mode', !isDarkMode);
+        localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+    }, [isDarkMode]);
+
+    const connectedCount = connections.filter(conn => conn.status === 'connected').length;
+    const totalServers = useStore(state => state.configuredServers.length);
+
+    const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
+
+    return (
+        // Apply dark/light class for potential CSS overrides beyond Tailwind
+        <div className={`app-container ${isDarkMode ? 'dark' : 'light'}`}>
             <header className="app-header">
-                <div className="container flex justify-between items-center">
-                    <h1 className="app-title">MCP Exploration Lab</h1>
-                    <StatusBar />
+                <div className="app-title">
+                    <i className="fas fa-flask text-primary-500"></i>
+                    <span>MCP Exploration Lab</span>
+                </div>
+
+                <div className="top-status-bar">
+                    <div className="theme-toggle">
+                        <button onClick={toggleDarkMode} className="theme-button" title={`Switch to ${isDarkMode ? 'Light' : 'Dark'} Mode`}>
+                            <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`}></i>
+                        </button>
+                    </div>
+                    <div className={`top-status-item ${isConnected ? 'top-status-connected' : 'top-status-disconnected'}`} title={`WebSocket connection is ${isConnected ? 'active' : 'inactive'}`}>
+                        <i className={`fas ${isConnected ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500'}`}></i>
+                        <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+                    </div>
+                    <div className="top-status-item" title={`${connectedCount} out of ${totalServers} servers are connected`}>
+                        <i className="fas fa-server"></i>
+                        <span>Servers: <strong>{connectedCount}</strong>/{totalServers}</span>
+                    </div>
                 </div>
             </header>
 
-            {/* Main Content */}
             <main className="main-content">
-                <div className="container">
-                    <div className="panel-container">
-                        <ServerSelector />
-                        {activeServerId && (
-                            <>
-                                <Navigation />
-                                <MainContentArea />
-                            </>
-                        )}
-                    </div>
+                <div className="panel-container">
+                    <ServerSelector />
+                    <Navigation />
+                    <MainContentArea />
                 </div>
             </main>
 
-            {/* Footer */}
             <footer className="app-footer">
-                <div className="container">
-                    <p>MCP Exploration Lab © {new Date().getFullYear()}</p>
+                <div className="footer-content">
+                    <div className="footer-info">
+                        <i className="fas fa-code"></i> MCP Exploration Lab
+                    </div>
+                    <div className="footer-copyright">
+                        © {new Date().getFullYear()} <i className="fas fa-heart text-red-500 mx-1"></i> Made with MCP
+                    </div>
                 </div>
             </footer>
         </div>

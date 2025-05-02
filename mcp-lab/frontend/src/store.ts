@@ -47,6 +47,7 @@ type AppState = {
     setPromptMessages: (connectionId: string, promptName: string, messages: any[], error?: string) => void;
     addRawWsMessage: (connectionId: string, direction: 'send' | 'recv', data: string) => void;
     handleWsMessage: (message: { type: string; payload: any }) => void;
+    clearLogs: (connectionId: string) => void;
 };
 
 // --- App Actions --- 
@@ -162,6 +163,21 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         addLog: (log) => {
             const timestamp = new Date().toLocaleTimeString([], { hour12: false });
             set((state) => ({ logs: [...state.logs.slice(-200), `[${timestamp}] ${log}`] }));
+        },
+
+        clearLogs: (connectionId) => {
+            set((state) => {
+                const updatedConnections = state.connections.map(conn => {
+                    if (conn.id === connectionId) {
+                        return {
+                            ...conn,
+                            rawWsMessages: []
+                        };
+                    }
+                    return conn;
+                });
+                return { connections: updatedConnections, logs: [] };
+            });
         },
 
         setConfiguredServers: (servers) => {
@@ -307,6 +323,16 @@ export const useStore = create<AppState & AppActions>((set, get) => {
             }));
         },
 
-        handleWsMessage: handleWsMessageInternal, // Assign the internal handler
+        handleWsMessage: (message) => {
+            handleWsMessageInternal(message);
+            // Log additional diagnostics for MCP-related messages
+            const { type, payload } = message;
+            if (['resourcesList', 'toolsList', 'promptsList'].includes(type)) {
+                const items = payload.data?.resources || payload.data?.tools || payload.data?.prompts;
+                const count = items ? items.length : 0;
+                console.log(`[MCP Debug] Received ${type} with ${count} items:`, items);
+                get().addLog(`[MCP Debug] ${type} received: ${count} items`);
+            }
+        },
     };
 }); 

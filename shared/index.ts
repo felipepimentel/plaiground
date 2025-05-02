@@ -23,6 +23,7 @@ export interface SimpleResource {
     uri: string;
     name?: string;
     description?: string;
+    mimeType?: string;
 }
 
 export interface SimpleParameterSchema {
@@ -33,6 +34,7 @@ export interface SimpleParameterSchema {
 export interface SimpleToolDefinition {
     name: string;
     description?: string;
+    inputSchema?: any;
     parameters?: {
         type?: string;
         properties: { [key: string]: SimpleParameterSchema };
@@ -43,6 +45,8 @@ export interface SimpleToolDefinition {
 export interface SimplePromptDefinition {
     name: string;
     description?: string;
+    template?: string | any;
+    inputSchema?: any;
     argumentsSchema?: {
         type?: string;
         properties: { [key: string]: SimpleParameterSchema };
@@ -57,6 +61,7 @@ export type PromptState = SimplePromptDefinition[];
 export interface SimpleServerInfo {
     name: string;
     version: string;
+    capabilities: string[];
 }
 
 // --- Main Connection State --- 
@@ -72,5 +77,7 @@ export interface ServerConnection {
     viewedResourceContent?: { uri: string; content: any; error?: string };
     lastToolResult?: { toolName: string; result: any; error?: string };
     viewedPromptMessages?: { promptName: string; messages: any[]; error?: string };
+    lastError?: string;
+    logs?: string[];
     rawWsMessages?: Array<{ direction: 'send' | 'recv', timestamp: number, data: string }>;
 } 
