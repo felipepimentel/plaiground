@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{{name}}"
+version = "1.0.0"
+description = "{{description}}"
+authors = [{ name = "MCP Lab User", email = "user@example.com" }]
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = ["mcp-python-sdk>=0.3.0"]
+
+[project.optional-dependencies]
+dev = ["black", "isort", "mypy"]

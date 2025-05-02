@@ -101,6 +101,33 @@ const getStatusDetails = (status: ServerConnection['status']) => {
     }
 };
 
+// Function to handle keyboard shortcuts globally
+function useKeyboardShortcuts(shortcuts: Record<string, () => void>) {
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            // Check if user is typing in an input field
+            if (event.target instanceof HTMLInputElement ||
+                event.target instanceof HTMLTextAreaElement) {
+                return;
+            }
+
+            // Handle key combinations (e.g., "Ctrl+R")
+            let key = event.key.toLowerCase();
+            if (event.ctrlKey) key = `ctrl+${key}`;
+            if (event.altKey) key = `alt+${key}`;
+            if (event.shiftKey) key = `shift+${key}`;
+
+            if (shortcuts[key]) {
+                event.preventDefault();
+                shortcuts[key]();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [shortcuts]);
+}
+
 // --- Server Selector Component ---
 function ServerSelector() {
     const { sendMessage, isConnected } = useWebSocket();
@@ -135,6 +162,17 @@ function ServerSelector() {
         });
     }, [configuredServers, connections, handleConnect]);
 
+    const handleRefreshServers = useCallback(() => {
+        console.log('[Frontend] Refreshing server list...');
+        sendMessage({ type: 'refreshServers', payload: {} });
+    }, [sendMessage]);
+
+    // Add keyboard shortcuts
+    useKeyboardShortcuts({
+        'r': handleRefreshServers,
+        'c': handleConnectAll,
+    });
+
     // Auto-request tools, resources, and prompts upon connection
     useEffect(() => {
         const connectedNeedsLoad = connections.filter(conn =>
@@ -162,10 +200,52 @@ function ServerSelector() {
                 connectionId: activeConn?.id,
                 status: activeConn?.status || 'disconnected',
                 serverInfo: activeConn?.serverInfo,
-                error: activeConn?.lastError
+                error: activeConn?.lastError,
+                category: config.category || 'Uncategorized',
             };
         });
     }, [configuredServers, connections]);
+
+    const categorizedServers = useMemo(() => {
+        const categories = new Map();
+
+        // Get category configuration from the store
+        const categoryOrder = useStore.getState().categoryConfig?.order || [];
+        const categoryIcons = useStore.getState().categoryConfig?.icons || {};
+
+        // Create a category for each server
+        serverList.forEach(server => {
+            const category = server.category || 'Uncategorized';
+            if (!categories.has(category)) {
+                categories.set(category, {
+                    name: category,
+                    icon: categoryIcons[category] || 'fa-folder',
+                    servers: []
+                });
+            }
+            categories.get(category).servers.push(server);
+        });
+
+        // Return categories in the specified order, with any remaining categories alphabetically
+        const sortedCategories = [];
+
+        // First add categories in the specified order
+        categoryOrder.forEach(categoryName => {
+            if (categories.has(categoryName)) {
+                sortedCategories.push(categories.get(categoryName));
+                categories.delete(categoryName);
+            }
+        });
+
+        // Then add any remaining categories alphabetically
+        Array.from(categories.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .forEach(([_, category]) => {
+                sortedCategories.push(category);
+            });
+
+        return sortedCategories;
+    }, [serverList]);
 
     return (
         <div className="server-sidebar">
@@ -173,14 +253,23 @@ function ServerSelector() {
                 <div className="sidebar-header-content">
                     <h3 className="sidebar-title">
                         <i className="fas fa-server icon"></i> <span>Servers</span>
+                        <span className="server-count">{serverList.length}</span>
                     </h3>
 
                     <div className="sidebar-actions">
                         <button
+                            onClick={handleRefreshServers}
+                            className="btn btn-xs btn-refresh"
+                            disabled={!isConnected}
+                            data-tooltip="Refresh Server List (R)"
+                        >
+                            <i className="fas fa-sync-alt"></i>
+                        </button>
+                        <button
                             onClick={handleConnectAll}
                             className="btn btn-xs btn-connect-all"
                             disabled={!isConnected || configuredServers.length === 0}
-                            title="Connect to all disconnected servers"
+                            data-tooltip="Connect All Servers (C)"
                         >
                             <i className="fas fa-plug"></i> <span>Connect All</span>
                         </button>
@@ -195,78 +284,87 @@ function ServerSelector() {
                 </div>
             </div>
 
-            <ul className="server-list scrollbar-thin">
+            <div className="server-categories">
                 {serverList.length === 0 ? (
                     <div className="server-list-empty">
-                        <i className="fas fa-info-circle mr-2"></i>
-                        <span>No servers configured</span>
+                        <i className="fas fa-server"></i>
+                        <p>No servers configured</p>
+                        <p className="text-xs text-gray-400 mt-2">Press <span className="shortcut-hint">R</span> to refresh server list</p>
                     </div>
                 ) : (
-                    serverList.map((server) => {
-                        const isActive = server.connectionId === activeServerId;
-                        const canBeActive = server.connectionId && server.status === 'connected';
-                        const statusDetails = getStatusDetails(server.status);
+                    categorizedServers.map(category => (
+                        <div key={category.name} className="server-category">
+                            <div className="category-header">
+                                <i className={`fas ${category.icon}`}></i>
+                                <span>{category.name}</span>
+                                <span className="server-count">{category.servers.length}</span>
+                            </div>
+                            <ul className="server-list">
+                                {category.servers.map((server) => {
+                                    const isActive = server.connectionId === activeServerId;
+                                    const canBeActive = server.connectionId && server.status === 'connected';
+                                    const statusDetails = getStatusDetails(server.status);
 
-                        return (
-                            <li key={server.name}
-                                className={`server-item ${isActive ? 'active' : ''} ${canBeActive ? 'can-activate' : ''}`}
-                                onClick={() => canBeActive && setActiveServer(server.connectionId)}
-                                title={`Select server ${server.name}`}
-                            >
-                                <div className="server-item-header">
-                                    <span className={`status-indicator ${statusDetails.class}`}></span>
-                                    <span className="server-icon">
-                                        <i className={statusDetails.icon}></i>
-                                    </span>
-                                    <span className="server-name">{server.name}</span>
-                                </div>
-
-                                {server.description && (
-                                    <div className="server-description">
-                                        <i className="fas fa-info-circle text-gray-400"></i> {server.description}
-                                    </div>
-                                )}
-
-                                {server.status === 'connecting' && (
-                                    <div className="server-description text-amber-600">
-                                        <i className="fas fa-spinner fa-spin"></i> Connecting...
-                                    </div>
-                                )}
-
-                                {server.status === 'error' && (
-                                    <div className="server-error">
-                                        <i className="fas fa-exclamation-triangle"></i> Connection error
-                                    </div>
-                                )}
-
-                                <div className="server-actions">
-                                    {server.status === 'connected' || server.status === 'connecting' ? (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); server.connectionId && handleDisconnect(server.connectionId); }}
-                                            className="btn btn-sm btn-disconnect"
-                                            disabled={server.status === 'connecting'}
-                                            title={`Disconnect from ${server.name}`}
+                                    return (
+                                        <li key={server.name}
+                                            className={`server-item ${isActive ? 'active' : ''} ${canBeActive ? 'can-activate' : ''}`}
+                                            onClick={() => canBeActive && setActiveServer(server.connectionId)}
+                                            data-tooltip={`${statusDetails.text}: ${server.name}`}
                                         >
-                                            <i className="fas fa-times-circle"></i>
-                                            <span>{server.status === 'connecting' ? 'Connecting...' : 'Disconnect'}</span>
-                                        </button>
-                                    ) : (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleConnect(server.name); }}
-                                            className="btn btn-sm btn-connect"
-                                            disabled={!isConnected}
-                                            title={`Connect to ${server.name}`}
-                                        >
-                                            <i className="fas fa-plug"></i>
-                                            <span>Connect</span>
-                                        </button>
-                                    )}
-                                </div>
-                            </li>
-                        );
-                    })
+                                            <div className="server-item-header">
+                                                <span className={`status-indicator ${statusDetails.class}`}></span>
+                                                <span className="server-name">{server.name}</span>
+                                            </div>
+
+                                            {server.description && (
+                                                <div className="server-description">
+                                                    {server.description}
+                                                </div>
+                                            )}
+
+                                            {server.status === 'connecting' && (
+                                                <div className="server-description text-amber-600">
+                                                    <i className="fas fa-spinner fa-spin"></i> Connecting...
+                                                </div>
+                                            )}
+
+                                            {server.status === 'error' && (
+                                                <div className="server-error">
+                                                    <i className="fas fa-exclamation-triangle"></i> Connection error
+                                                </div>
+                                            )}
+
+                                            <div className="server-actions">
+                                                {server.status === 'connected' || server.status === 'connecting' ? (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); server.connectionId && handleDisconnect(server.connectionId); }}
+                                                        className="btn-disconnect"
+                                                        disabled={server.status === 'connecting'}
+                                                        title={`Disconnect from ${server.name}`}
+                                                    >
+                                                        <i className="fas fa-times-circle"></i>
+                                                        <span>{server.status === 'connecting' ? 'Connecting...' : 'Disconnect'}</span>
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleConnect(server.name); }}
+                                                        className="btn-connect"
+                                                        disabled={!isConnected}
+                                                        title={`Connect to ${server.name}`}
+                                                    >
+                                                        <i className="fas fa-plug"></i>
+                                                        <span>Connect</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                    ))
                 )}
-            </ul>
+            </div>
         </div>
     );
 }
@@ -279,10 +377,10 @@ function Navigation() {
 
     // Define base navigation items
     const navItemsConfig = [
-        { id: 'Resources' as ActiveView, label: 'Resources', icon: 'fas fa-database' },
-        { id: 'Tools' as ActiveView, label: 'Tools', icon: 'fas fa-tools' },
-        { id: 'Prompts' as ActiveView, label: 'Prompts', icon: 'fas fa-comment-dots' },
-        { id: 'Messages' as ActiveView, label: 'Messages', icon: 'fas fa-envelope' },
+        { id: 'Resources' as ActiveView, label: 'Resources', icon: 'fas fa-database', shortcut: '1' },
+        { id: 'Tools' as ActiveView, label: 'Tools', icon: 'fas fa-tools', shortcut: '2' },
+        { id: 'Prompts' as ActiveView, label: 'Prompts', icon: 'fas fa-comment-dots', shortcut: '3' },
+        { id: 'Messages' as ActiveView, label: 'Messages', icon: 'fas fa-envelope', shortcut: '4' },
     ];
 
     // Determine disabled state based on connection status and capabilities
@@ -296,6 +394,18 @@ function Navigation() {
         // Keep item always visible, just control disabled state
         return { ...item, disabled };
     });
+
+    // Add keyboard shortcuts for navigation
+    useKeyboardShortcuts(
+        Object.fromEntries(
+            navItems
+                .filter(item => !item.disabled)
+                .map(item => [
+                    item.shortcut,
+                    () => setActiveView(item.id)
+                ])
+        )
+    );
 
     const isLoadingCapabilities = useMemo(() => {
         if (!isServerConnected || !activeConnection) return false;
@@ -317,10 +427,11 @@ function Navigation() {
                         key={item.id}
                         className={`nav-item ${activeView === item.id && !item.disabled ? 'active' : ''} ${item.disabled ? 'disabled' : 'cursor-pointer'}`}
                         onClick={() => !item.disabled && setActiveView(item.id)}
-                        title={item.disabled ? (activeServerId ? 'Capability not available' : 'Select a connected server') : item.label}
+                        data-tooltip={item.disabled ? (activeServerId ? 'Capability not available' : 'Select a connected server') : `View ${item.label}`}
                     >
                         <span className="nav-item-icon"><i className={item.icon}></i></span>
                         <span>{item.label}</span>
+                        {!item.disabled && <span className="shortcut-hint">{item.shortcut}</span>}
                     </li>
                 ))}
             </ul>
@@ -343,30 +454,57 @@ function Navigation() {
 // Improved No Server Selected Placeholder
 function NoServerSelectedPlaceholder() {
     return (
-        <div className="no-server-selected">
-            <div className="no-server-icon">
-                <i className="fas fa-server"></i>
-            </div>
-            <div className="no-server-content">
-                <h2 className="no-server-title">No Server Selected</h2>
-                <p className="no-server-text">
-                    Connect to or select a server from the sidebar to begin exploring available resources and tools.
-                </p>
-                <div className="no-server-instruction">
-                    <div className="instruction-step">
-                        <div className="step-number">1</div>
-                        <div className="step-text">
-                            <strong>Connect</strong> to a server using the buttons in the sidebar
-                        </div>
+        <div className="content-placeholder">
+            <i className="fas fa-server placeholder-icon"></i>
+            <h2 className="placeholder-title">No Server Selected</h2>
+            <p className="placeholder-text">
+                Connect to or select a server from the sidebar to begin exploring available resources and tools.
+            </p>
+            <div className="placeholder-actions mt-6">
+                <div className="instruction-step">
+                    <div className="step-number">1</div>
+                    <div className="step-text">
+                        <strong>Connect</strong> to a server using the buttons in the sidebar
                     </div>
-                    <div className="instruction-step">
-                        <div className="step-number">2</div>
-                        <div className="step-text">
-                            <strong>Select</strong> the server to explore its capabilities
-                        </div>
+                </div>
+                <div className="instruction-step">
+                    <div className="step-number">2</div>
+                    <div className="step-text">
+                        <strong>Select</strong> the server to explore its capabilities
+                    </div>
+                </div>
+                <div className="instruction-step">
+                    <div className="step-number">3</div>
+                    <div className="step-text">
+                        <strong>Navigate</strong> between views using the sidebar
                     </div>
                 </div>
             </div>
+            <div className="shortcut-guide mt-8">
+                <h3 className="text-gray-300 text-sm font-semibold mb-2">Keyboard Shortcuts</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm text-gray-400">
+                    <div className="flex items-center">
+                        <span className="shortcut-hint mr-2">R</span> Refresh servers
+                    </div>
+                    <div className="flex items-center">
+                        <span className="shortcut-hint mr-2">C</span> Connect all servers
+                    </div>
+                    <div className="flex items-center">
+                        <span className="shortcut-hint mr-2">1-4</span> Switch views
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Update the Loading State Component
+function LoadingPlaceholder({ title, message }) {
+    return (
+        <div className="content-placeholder">
+            <div className="loading-spinner"></div>
+            <h2 className="placeholder-title">{title}</h2>
+            <p className="placeholder-text">{message}</p>
         </div>
     );
 }
@@ -376,37 +514,57 @@ function MainContentArea() {
     const { activeServerId, activeView, connections } = useStore();
     const activeConnection = connections.find(conn => conn.id === activeServerId);
 
-    const renderPlaceholder = (icon: string, title: string, text: string, extraContent?: React.ReactNode) => (
-        <div className="content-placeholder">
-            <i className={`${icon} placeholder-icon`}></i>
-            <h3 className="placeholder-title">{title}</h3>
-            <p className="placeholder-text">{text}</p>
-            {extraContent}
-        </div>
-    );
-
-    // Content for resources view
+    // Content for resources view with improved UI
     const renderResourcesContent = useCallback(() => {
-        if (!activeConnection) return null; // Should not happen if view is active
+        if (!activeConnection) return null;
 
         if (activeConnection.resources === undefined) {
-            return renderPlaceholder("fas fa-spinner fa-spin", "Loading Resources", "Fetching available resources from the server...");
+            return <LoadingPlaceholder
+                title="Loading Resources"
+                message="Fetching available resources from the server..."
+            />;
         }
+
         if (activeConnection.resources.length === 0) {
-            return renderPlaceholder("fas fa-box-open", "No Resources", "This server does not expose any resources."); // Changed icon
+            return (
+                <div className="card-list-empty">
+                    <i className="fas fa-box-open"></i>
+                    <h3>No Resources Available</h3>
+                    <p>This server does not expose any resources. Resources are static data that can be used by LLMs.</p>
+                </div>
+            );
         }
 
         return (
             <div className="resource-list">
                 {activeConnection.resources.map((resource) => (
                     <div key={resource.uri} className="resource-item">
+                        <div className="card-hover-effect"></div>
+                        <span className="card-badge card-badge-primary">Resource</span>
                         <div className="resource-item-header">
-                            <i className={`fas fa-${resource.mimeType?.includes('text') ? 'file-alt' : 'file-code'}`}></i> {/* Icon based on type */}
-                            <h3 className="resource-name">{resource.name}</h3>
+                            <i className={`fas fa-${resource.mimeType?.includes('text') ? 'file-alt' : 'file-code'}`}></i>
+                            <h3 className="resource-name">{resource.name || 'Unnamed Resource'}</h3>
                         </div>
                         <div className="resource-meta">
                             <span className="resource-type">{resource.mimeType || 'unknown type'}</span>
+                            <div className="resource-tags">
+                                <span className="resource-tag"><i className="fas fa-tag"></i> Static</span>
+                                {resource.mimeType?.includes('json') &&
+                                    <span className="resource-tag"><i className="fas fa-code"></i> JSON</span>
+                                }
+                                {resource.mimeType?.includes('text') &&
+                                    <span className="resource-tag"><i className="fas fa-align-left"></i> Text</span>
+                                }
+                            </div>
                             <span className="resource-uri" title={resource.uri}>{resource.uri}</span>
+                        </div>
+                        <div className="card-actions">
+                            <button className="card-action-btn" title="Copy resource URI">
+                                <i className="fas fa-copy"></i>
+                            </button>
+                            <button className="card-action-btn card-action-btn-primary" title="View resource details">
+                                <i className="fas fa-eye"></i>
+                            </button>
                         </div>
                     </div>
                 ))}
@@ -414,146 +572,189 @@ function MainContentArea() {
         );
     }, [activeConnection]);
 
-    // Content for tools view
+    // Content for tools view with improved UI
     const renderToolsContent = useCallback(() => {
         if (!activeConnection) return null;
 
         if (activeConnection.tools === undefined) {
-            return renderPlaceholder("fas fa-spinner fa-spin", "Loading Tools", "Fetching available tools from the server...");
+            return <LoadingPlaceholder
+                title="Loading Tools"
+                message="Fetching available tools from the server..."
+            />;
         }
+
         if (activeConnection.tools.length === 0) {
-            return renderPlaceholder("fas fa-toolbox", "No Tools", "This server does not provide any tools."); // Changed icon
+            return (
+                <div className="card-list-empty">
+                    <i className="fas fa-toolbox"></i>
+                    <h3>No Tools Available</h3>
+                    <p>This server does not provide any tools. Tools are functions that can be called by LLMs to perform actions.</p>
+                </div>
+            );
         }
 
         return (
             <div className="tools-list">
                 {activeConnection.tools.map((tool) => (
                     <div key={tool.name} className="tool-item">
+                        <div className="card-hover-effect"></div>
+                        <span className="card-badge card-badge-success">Function</span>
                         <div className="tool-item-header">
                             <i className="fas fa-wrench"></i>
                             <h3 className="tool-name">{tool.name}</h3>
                         </div>
                         <p className="tool-description">{tool.description}</p>
-                        {/* TODO: Add capability to interact with tools */}
+
+                        <div className="tool-details">
+                            {tool.parameters && (
+                                <span className="tool-tag">
+                                    <i className="fas fa-input"></i>
+                                    {Object.keys(tool.parameters).length} parameters
+                                </span>
+                            )}
+                        </div>
+
+                        {tool.parameters && Object.keys(tool.parameters).length > 0 && (
+                            <div className="prompt-arguments">
+                                <div className="prompt-arguments-header">
+                                    <i className="fas fa-list-ul"></i> Parameters
+                                </div>
+                                <ul className="prompt-arguments-list">
+                                    {Object.entries(tool.parameters).map(([name, param]) => (
+                                        <li key={name} className="prompt-argument-item">
+                                            <span className="prompt-argument-name">{name}</span>
+                                            <span className="prompt-argument-type">{param.type}</span>
+                                            {param.description && <span className="prompt-argument-description">{param.description}</span>}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
+                        <div className="card-actions">
+                            <button className="card-action-btn" title="Copy tool name">
+                                <i className="fas fa-copy"></i>
+                            </button>
+                            <button className="card-action-btn card-action-btn-primary" title="Try tool">
+                                <i className="fas fa-play"></i>
+                            </button>
+                        </div>
                     </div>
                 ))}
             </div>
         );
     }, [activeConnection]);
 
-    // Content for prompts view
+    // Content for prompts view with improved UI
     const renderPromptsContent = useCallback(() => {
         if (!activeConnection) return null;
 
         if (activeConnection.prompts === undefined) {
-            return renderPlaceholder("fas fa-spinner fa-spin", "Loading Prompts", "Fetching available prompts from the server...");
+            return <LoadingPlaceholder
+                title="Loading Prompts"
+                message="Fetching available prompts from the server..."
+            />;
         }
+
         if (activeConnection.prompts.length === 0) {
-            return renderPlaceholder("fas fa-comments", "No Prompts", "This server does not offer any prompts."); // Changed icon
+            return (
+                <div className="card-list-empty">
+                    <i className="fas fa-comments"></i>
+                    <h3>No Prompts Available</h3>
+                    <p>This server does not offer any prompts. Prompts are templates for generating text with LLMs.</p>
+                </div>
+            );
         }
 
         return (
-            <div className="prompt-container">
-                <div className="prompts-grid">
-                    {activeConnection.prompts.map((prompt) => (
-                        <div key={prompt.name} className="prompt-box">
-                            <div className="prompt-header">
-                                <i className="fas fa-comment-alt"></i> {/* Changed icon */}
-                                <h3 className="prompt-title">{prompt.name}</h3>
-                            </div>
-                            <p className="prompt-description">{prompt.description}</p>
-
-                            {prompt.arguments && prompt.arguments.length > 0 && (
-                                <div className="prompt-arguments">
-                                    <div className="prompt-arguments-header">
-                                        <i className="fas fa-list-ul"></i> Arguments:
-                                    </div>
-                                    <ul className="prompt-arguments-list">
-                                        {prompt.arguments.map((arg, index) => (
-                                            <li key={index} className="prompt-argument-item">
-                                                <span className="prompt-argument-name">{arg.name}</span>
-                                                <span className="prompt-argument-type">{arg.type}</span>
-                                                {arg.description && <span className="prompt-argument-description">- {arg.description}</span>} {/* Added hyphen */}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                            {/* TODO: Add capability to interact with prompts */}
+            <div className="prompts-grid">
+                {activeConnection.prompts.map((prompt) => (
+                    <div key={prompt.name} className="prompt-box">
+                        <div className="card-hover-effect"></div>
+                        <span className="card-badge card-badge-warning">Prompt</span>
+                        <div className="prompt-header">
+                            <i className="fas fa-comment-alt"></i>
+                            <h3 className="prompt-title">{prompt.name}</h3>
                         </div>
-                    ))}
-                </div>
+                        <p className="prompt-description">{prompt.description}</p>
+
+                        <div className="prompt-meta">
+                            {prompt.arguments && (
+                                <span className="prompt-meta-item">
+                                    <i className="fas fa-list"></i>
+                                    {prompt.arguments.length} arguments
+                                </span>
+                            )}
+                            <span className="prompt-meta-item">
+                                <i className="fas fa-tag"></i> Template
+                            </span>
+                        </div>
+
+                        {prompt.arguments && prompt.arguments.length > 0 && (
+                            <div className="prompt-arguments">
+                                <div className="prompt-arguments-header">
+                                    <i className="fas fa-list-ul"></i> Arguments
+                                </div>
+                                <ul className="prompt-arguments-list">
+                                    {prompt.arguments.map((arg, index) => (
+                                        <li key={index} className="prompt-argument-item">
+                                            <span className="prompt-argument-name">{arg.name}</span>
+                                            <span className="prompt-argument-type">{arg.type}</span>
+                                            {arg.description && <span className="prompt-argument-description">{arg.description}</span>}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
+                        <div className="card-actions">
+                            <button className="card-action-btn" title="Copy prompt name">
+                                <i className="fas fa-copy"></i>
+                            </button>
+                            <button className="card-action-btn card-action-btn-primary" title="Use prompt">
+                                <i className="fas fa-play"></i>
+                            </button>
+                        </div>
+                    </div>
+                ))}
             </div>
         );
     }, [activeConnection]);
 
-    // Content for messages view
-    const renderMessagesContent = useCallback(() => {
-        if (!activeConnection) return null;
-
-        const clearMessages = () => {
-            console.log('[Frontend] Clearing logs for connection:', activeServerId);
-            useStore.getState().clearLogs(activeServerId || '');
-        };
-
-        return (
-            <div className="messages-container">
-                {activeConnection.rawWsMessages && activeConnection.rawWsMessages.length > 0 ? (
-                    <div className="messages-list scrollbar-thin">
-                        {activeConnection.rawWsMessages.map((message, idx) => (
-                            <div key={idx} className={`message-item ${message.direction === 'send' ? 'message-outgoing' : 'message-incoming'}`}>
-                                <div className="message-header">
-                                    <span className="message-direction">
-                                        {message.direction === 'send' ? (
-                                            <><i className="fas fa-arrow-up text-blue-500"></i> Sent</> // Changed icon/color
-                                        ) : (
-                                            <><i className="fas fa-arrow-down text-green-500"></i> Received</> // Changed icon/color
-                                        )}
-                                    </span>
-                                    <span className="message-timestamp">
-                                        <i className="far fa-clock"></i> {new Date(message.timestamp).toLocaleTimeString()}
-                                    </span>
-                                </div>
-                                <pre className="message-content scrollbar-thin">{JSON.stringify(message.data, null, 2)}</pre>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    renderPlaceholder("fas fa-comment-slash", "No Messages", "No messages recorded for this connection yet.") // Changed icon
-                )}
-
-                <div className="messages-actions">
-                    <button className="btn btn-sm btn-secondary" onClick={clearMessages} title="Clear all messages for this session" disabled={!activeConnection.rawWsMessages || activeConnection.rawWsMessages.length === 0}>
-                        <i className="fas fa-trash-alt"></i> <span>Clear Messages</span>
-                    </button>
-                </div>
-            </div>
-        );
-    }, [activeConnection, activeServerId]);
-
+    // Render the appropriate content for the active view
     const renderContent = () => {
         if (!activeServerId) {
             return <NoServerSelectedPlaceholder />;
         }
 
         if (!activeConnection) {
-            return renderPlaceholder("fas fa-question-circle", "Error", "Could not find details for the selected server.");
+            return (
+                <div className="content-placeholder">
+                    <i className="fas fa-question-circle placeholder-icon"></i>
+                    <h2 className="placeholder-title">Server Not Found</h2>
+                    <p className="placeholder-text">Could not find details for the selected server.</p>
+                </div>
+            );
         }
 
         const statusDetails = getStatusDetails(activeConnection.status);
 
         if (activeConnection.status !== 'connected') {
             const errorContent = activeConnection.status === 'error' && activeConnection.lastError ? (
-                <div className="error-container mt-4">
-                    <div className="error-icon"><i className="fas fa-exclamation-circle"></i></div>
-                    <div className="error-content">
-                        <div className="error-title">Connection Error</div>
-                        <pre className="error-message">{activeConnection.lastError}</pre>
-                    </div>
+                <div className="error-details mt-4">
+                    <h3 className="text-red-400 font-medium mb-2">Error Details</h3>
+                    <pre className="bg-red-900/20 text-red-300 p-3 rounded text-sm overflow-auto max-w-2xl">{activeConnection.lastError}</pre>
                 </div>
             ) : null;
 
-            return renderPlaceholder(statusDetails.icon, `Server ${statusDetails.text}`, `The selected server (${activeConnection.name}) is currently ${activeConnection.status}.`, errorContent);
+            return (
+                <div className="content-placeholder">
+                    <i className={`${statusDetails.icon} placeholder-icon text-${activeConnection.status === 'error' ? 'red-500' : 'amber-500'}`}></i>
+                    <h2 className="placeholder-title">Server {statusDetails.text}</h2>
+                    <p className="placeholder-text">The selected server ({activeConnection.name}) is currently {activeConnection.status}.</p>
+                    {errorContent}
+                </div>
+            );
         }
 
         // Render view content
@@ -567,9 +768,15 @@ function MainContentArea() {
                 if (activeConnection.resources !== undefined) {
                     // Use a slight delay to allow store update to propagate if needed
                     setTimeout(() => useStore.getState().setActiveView('Resources'), 0);
-                    return renderPlaceholder("fas fa-spinner fa-spin", "Loading", "Loading default view...");
+                    return <LoadingPlaceholder title="Loading" message="Loading default view..." />;
                 } else {
-                    return renderPlaceholder("fas fa-compass", "Select a View", "Choose a view from the navigation menu to explore capabilities.");
+                    return (
+                        <div className="content-placeholder">
+                            <i className="fas fa-compass placeholder-icon"></i>
+                            <h2 className="placeholder-title">Select a View</h2>
+                            <p className="placeholder-text">Choose a view from the navigation menu to explore capabilities.</p>
+                        </div>
+                    );
                 }
         }
     };
@@ -605,16 +812,32 @@ function MainContentArea() {
         <div className="main-area">
             {activeConnection?.status === 'connected' && activeView && (
                 <div className="main-area-header">
-                    <h2 className="main-area-title">
-                        {headerDetails.icon && <i className={`${headerDetails.icon} text-primary-500`}></i>}
-                        <span>{headerDetails.title}</span>
-                        <span className="server-pill">
-                            <i className="fas fa-server"></i> {activeConnection.name}
-                        </span>
+                    <div className="flex items-center">
+                        <h2 className="main-area-title">
+                            {headerDetails.icon && <i className={`${headerDetails.icon} text-primary-500 mr-2`}></i>}
+                            <span>{headerDetails.title}</span>
+                        </h2>
+                        <div className="server-badge">
+                            <i className="fas fa-server mr-1"></i> {activeConnection.name}
+                        </div>
                         {headerDetails.count !== undefined && (
-                            <span className="counter">{headerDetails.count}</span>
+                            <div className="items-count ml-2">
+                                {headerDetails.count}
+                            </div>
                         )}
-                    </h2>
+                    </div>
+                    {activeView === 'Resources' && activeConnection.resources?.length > 0 && (
+                        <div className="view-actions">
+                            <div className="search-box">
+                                <i className="fas fa-search search-icon"></i>
+                                <input
+                                    type="text"
+                                    placeholder="Search resources..."
+                                    className="search-input"
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
             <div className="main-area-content scrollbar-thin">
@@ -632,6 +855,11 @@ function App() {
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme) return savedTheme === 'dark';
         return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    });
+
+    // Add keyboard shortcut for theme toggle
+    useKeyboardShortcuts({
+        'd': () => setIsDarkMode(!isDarkMode),
     });
 
     useEffect(() => {
@@ -656,7 +884,7 @@ function App() {
 
                 <div className="top-status-bar">
                     <div className="theme-toggle">
-                        <button onClick={toggleDarkMode} className="theme-button" title={`Switch to ${isDarkMode ? 'Light' : 'Dark'} Mode`}>
+                        <button onClick={toggleDarkMode} className="theme-button" data-tooltip={`Switch to ${isDarkMode ? 'Light' : 'Dark'} Mode (D)`}>
                             <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`}></i>
                         </button>
                     </div>

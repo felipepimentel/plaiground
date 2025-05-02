@@ -8,6 +8,7 @@ import path from 'path'; // Import path for resolving file path
 // Use import.meta.url to get the current module's path
 import { fileURLToPath } from 'url';
 import { WebSocket, WebSocketServer } from 'ws';
+import { closeWatchers, discoverServers, refreshServers } from './discovery.js';
 // Calculate the directory name of the current module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,9 +23,19 @@ const CONFIG_FILE_PATH = path.resolve(__dirname, '../../../mcp-lab-config.json')
 console.log(`Looking for server config at: ${CONFIG_FILE_PATH}`); // Log the path
 // Use a Map for easier lookup by server name
 let configuredServers = new Map();
+let autoDiscoveredServers = new Map();
 // Rate limiting for list requests
 const listRequestRateLimits = new Map();
-function loadServerConfigs() {
+// Store connection config
+let connectionConfig;
+// Record of reconnection attempts for each server
+const reconnectionAttempts = new Map();
+// Add categories to the config loading
+let categoryConfig;
+/**
+ * Load and parse the main configuration file
+ */
+async function loadServerConfigs() {
     console.log(`Attempting to load server configs from: ${CONFIG_FILE_PATH}`);
     try {
         if (fs.existsSync(CONFIG_FILE_PATH)) {
@@ -66,6 +77,81 @@ function loadServerConfigs() {
                     console.error("Config file does not contain a valid 'mcpServers' object at the root.");
                     configuredServers = new Map();
                 }
+                // Handle auto-discovery if configured
+                if (parsedConfig.autoDiscovery && typeof parsedConfig.autoDiscovery === 'object') {
+                    const autoDiscoveryConfig = parsedConfig.autoDiscovery;
+                    if (autoDiscoveryConfig.enabled) {
+                        console.log('[Discovery] Auto-discovery enabled, scanning for servers...');
+                        autoDiscoveredServers = await discoverServers(CONFIG_FILE_PATH, autoDiscoveryConfig);
+                        console.log(`[Discovery] Found ${autoDiscoveredServers.size} auto-discovered MCP servers`);
+                        // Set up event listener for hot reload if enabled
+                        if (autoDiscoveryConfig.hotReload?.enabled) {
+                            process.on('mcp:reload', async ({ directory }) => {
+                                console.log(`[HotReload] Refreshing servers from ${directory}`);
+                                const result = await refreshServers(CONFIG_FILE_PATH, autoDiscoveryConfig, autoDiscoveredServers);
+                                // Handle changed servers
+                                if (result.changes && result.changes.size > 0) {
+                                    // Update the server map with new/changed servers
+                                    for (const [name, server] of result.changes.entries()) {
+                                        autoDiscoveredServers.set(name, server);
+                                        // Disconnect any existing connections to this server
+                                        disconnectServerConnections(name);
+                                    }
+                                    // Notify all connected WebSocket clients about server list changes
+                                    const connectedWebSockets = getConnectedWebSockets();
+                                    for (const ws of connectedWebSockets) {
+                                        sendConfiguredServersList(ws);
+                                    }
+                                    // Auto-connect to newly discovered servers if enabled
+                                    if (connectionConfig?.autoConnect.enabled && connectionConfig.autoConnect.onDiscovery) {
+                                        // Get the first connected WebSocket for auto-connect
+                                        const websocket = Array.from(connectedWebSockets)[0];
+                                        if (websocket) {
+                                            // Only auto-connect to newly discovered servers
+                                            const changedServerNames = Array.from(result.changes.keys());
+                                            const serverNamesToConnect = connectionConfig.autoConnect.servers.length > 0
+                                                ? changedServerNames.filter(name => connectionConfig.autoConnect.servers.includes(name))
+                                                : changedServerNames;
+                                            if (serverNamesToConnect.length > 0) {
+                                                console.log(`[AutoConnect] Auto-connecting to newly discovered servers: ${serverNamesToConnect.join(', ')}`);
+                                                // Connect to each server with a slight delay between connections
+                                                for (let i = 0; i < serverNamesToConnect.length; i++) {
+                                                    const serverName = serverNamesToConnect[i];
+                                                    console.log(`[AutoConnect] Connecting to server '${serverName}'`);
+                                                    await handleConnectConfigured(websocket, serverName);
+                                                    // Add a small delay between connections
+                                                    if (i < serverNamesToConnect.length - 1) {
+                                                        await new Promise(resolve => setTimeout(resolve, 500));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // Handle removed servers
+                                if (result.removed && result.removed.size > 0) {
+                                    for (const name of result.removed) {
+                                        autoDiscoveredServers.delete(name);
+                                        disconnectServerConnections(name);
+                                    }
+                                    // Notify all connected WebSocket clients about server list changes
+                                    for (const ws of getConnectedWebSockets()) {
+                                        sendConfiguredServersList(ws);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+                if (parsedConfig.connection && typeof parsedConfig.connection === 'object') {
+                    connectionConfig = parsedConfig.connection;
+                    console.log('[Config] Connection configuration loaded:', connectionConfig);
+                }
+                // Modify loadServerConfigs function to load category configuration
+                if (parsedConfig.categories && typeof parsedConfig.categories === 'object') {
+                    categoryConfig = parsedConfig.categories;
+                    console.log('[Config] Category configuration loaded:', categoryConfig);
+                }
             }
             catch (parseError) {
                 console.error("Error PARSING config file JSON:", parseError);
@@ -84,8 +170,55 @@ function loadServerConfigs() {
     }
 }
 // Load configs on startup
-loadServerConfigs();
+await loadServerConfigs();
 const activeConnections = new Map();
+/**
+ * Get a merged map of all MCP servers (configured + auto-discovered)
+ */
+function getAllServers() {
+    const allServers = new Map();
+    // Add manually configured servers
+    for (const [name, config] of configuredServers.entries()) {
+        allServers.set(name, config);
+    }
+    // Add auto-discovered servers (will override manual configs with same name)
+    for (const [name, config] of autoDiscoveredServers.entries()) {
+        allServers.set(name, config);
+    }
+    return allServers;
+}
+/**
+ * Get all active WebSocket connections
+ */
+function getConnectedWebSockets() {
+    const sockets = new Set();
+    for (const conn of activeConnections.values()) {
+        if (conn.websocket && conn.websocket.readyState === WebSocket.OPEN) {
+            sockets.add(conn.websocket);
+        }
+    }
+    return sockets;
+}
+/**
+ * Disconnect all active connections to a specific server
+ */
+function disconnectServerConnections(serverName) {
+    const connectionsToClose = Array.from(activeConnections.entries())
+        .filter(([_, conn]) => conn.configName === serverName);
+    for (const [id, conn] of connectionsToClose) {
+        console.log(`[HotReload] Disconnecting server connection ${id} (${serverName})`);
+        handleDisconnect(id);
+        // Notify UI of disconnect
+        if (conn.websocket && conn.websocket.readyState === WebSocket.OPEN) {
+            sendWsMessage(conn.websocket, 'connectionStatus', {
+                id,
+                name: serverName,
+                status: 'disconnected',
+                message: 'Server disconnected due to hot reload'
+            });
+        }
+    }
+}
 // Create a function to start the WebSocket server
 function startWebSocketServer() {
     try {
@@ -95,6 +228,11 @@ function startWebSocketServer() {
             console.log('Frontend connected via WebSocket.');
             // Send the list of configured servers on new connection immediately
             sendConfiguredServersList(ws);
+            // Auto-connect to servers if enabled for startup
+            if (connectionConfig?.autoConnect.enabled && connectionConfig.autoConnect.onStartup) {
+                // Slight delay to ensure the frontend has initialized
+                setTimeout(() => autoConnectServers(ws), 1000);
+            }
             ws.on('message', async (message) => {
                 const rawMessage = message.toString();
                 sendWsMessage(ws, 'rawLog', { direction: 'recv', data: rawMessage });
@@ -159,11 +297,29 @@ function startWebSocketServer() {
                             }
                             return;
                         }
+                        // New method for refreshing servers
+                        else if (data.method === 'refreshServers') {
+                            console.log('[Backend] Received request to refresh servers');
+                            await loadServerConfigs(); // Reload config and auto-discovered servers
+                            sendConfiguredServersList(ws); // Send updated list
+                            // Send a proper JSON-RPC 2.0 response
+                            const response = {
+                                jsonrpc: '2.0',
+                                id: data.id,
+                                result: { success: true }
+                            };
+                            ws.send(JSON.stringify(response));
+                            return;
+                        }
                         // Add handlers for other MCP methods as needed
                     }
                     // --- Handle our legacy internal message types ---
                     if (data.type === 'getConfiguredServers') {
                         sendConfiguredServersList(ws);
+                    }
+                    else if (data.type === 'refreshServers') {
+                        await loadServerConfigs(); // Reload config and auto-discovered servers
+                        sendConfiguredServersList(ws); // Send updated list
                     }
                     else if (data.type === 'connectConfigured') { // Changed connectStdio to connectConfigured
                         console.log("[Backend] Received 'connectConfigured' message:", data.payload);
@@ -253,13 +409,18 @@ function startWebSocketServer() {
 const wss = startWebSocketServer();
 // --- NEW: Helper function to send the configured server list ---
 function sendConfiguredServersList(ws) {
-    const serverList = Array.from(configuredServers.values());
+    const allServers = getAllServers();
+    const serverList = Array.from(allServers.values());
     console.log(`Sending configuredServersList to frontend. Count: ${serverList.length}`);
-    sendWsMessage(ws, 'configuredServersList', { servers: serverList });
+    sendWsMessage(ws, 'configuredServersList', {
+        servers: serverList,
+        categoryConfig // Include category configuration 
+    });
 }
 // Modify handleConnectConfigured to use serverName and the config map
 async function handleConnectConfigured(ws, serverName) {
-    const config = configuredServers.get(serverName);
+    const allServers = getAllServers();
+    const config = allServers.get(serverName);
     if (!config) {
         console.error(`Server configuration with name '${serverName}' not found.`);
         // Send specific status error for this server
@@ -449,44 +610,26 @@ async function handleConnectStdio(ws, command, args, configName, configCwd) {
                     }
                 }
             }
-            catch (error) {
-                console.error(`MCP capabilities request failed for ${configName} (${connectionId}):`, error);
-                if (connection && connection.status === 'connecting') {
-                    connection.status = 'error';
-                    sendWsMessage(ws, 'connectionStatus', {
-                        id: connectionId,
-                        name: configName,
-                        status: 'error',
-                        error: error instanceof Error ? error.message : String(error)
-                    });
-                    console.error(`[Backend] Connection failed for ${configName} (${connectionId}) - capabilities request failed.`);
-                    // Clean up? Client might close itself.
-                    // activeConnections.delete(connectionId);
-                }
+            catch (err) {
+                console.error(`[Backend] Failed to initialize MCP client for ${configName}:`, err);
+                sendWsError(ws, `Error initializing client for ${configName}: ${err}`);
             }
-        }, 3000); // Increase timeout slightly
+        }, 1000);
     }
     catch (error) {
-        // Any error during the connect attempt means the connection failed.
-        console.error(`Connect attempt failed for ${configName} (${connectionId}):`, error);
-        // Send error status for any connection failure during this phase
+        console.error(`[Backend] Error connecting to server ${configName}:`, error);
         sendWsMessage(ws, 'connectionStatus', {
             id: connectionId,
             name: configName,
             status: 'error',
-            error: error instanceof Error ? error.message : String(error)
+            error: `Connection error: ${error}`
         });
-        // Clean up connection state 
         if (connection) {
-            // We need to ensure the transport is disposed if connect failed partially
-            // Transport might not have a close method or it might throw, wrap in try-catch
-            try {
-                connection.transport?.close();
-            }
-            catch (transportCloseError) {
-                console.error(`Error closing transport during connect failure cleanup for ${configName}:`, transportCloseError);
-            }
-            activeConnections.delete(connectionId);
+            connection.status = 'error';
+            // Remove after a delay to allow error message propagation
+            setTimeout(() => {
+                activeConnections.delete(connectionId);
+            }, 5000);
         }
     }
 }
@@ -558,8 +701,10 @@ function handleDisconnect(connectionId) {
         if (previousStatus !== 'error') {
             sendWsMessage(connection.websocket, 'connectionStatus', { id: connection.id, name: connection.configName, status: 'disconnected', reason: 'User initiated' });
         }
-        // Don't delete immediately, let close handler do it.
-        // activeConnections.delete(connectionId);
+        // If this wasn't a user-initiated disconnect and reconnect is enabled, try to reconnect
+        if (previousStatus === 'error' && connectionConfig?.reconnect.enabled) {
+            handleAutoReconnect(connection.websocket, connection.configName);
+        }
     }
     else if (!connection) {
         console.warn(`Attempted to disconnect non-existent connection: ${connectionId}`);
@@ -642,5 +787,78 @@ async function handleGetPrompt(ws, connectionId, promptName, args) {
     catch (error) {
         console.error(`Error during getPrompt for ${promptName} on ${connection.configName} (${connectionId}):`, error);
         sendWsMessage(ws, 'promptMessages', { connectionId, promptName, error: error instanceof Error ? error.message : String(error) });
+    }
+}
+// Add a cleanup handler for proper shutdown
+process.on('SIGINT', () => {
+    console.log('Shutting down MCP Lab backend...');
+    closeWatchers();
+    process.exit(0);
+});
+/**
+ * Auto-connect to servers based on configuration
+ */
+async function autoConnectServers(websocket) {
+    if (!connectionConfig?.autoConnect.enabled) {
+        console.log('[AutoConnect] Auto-connect disabled, skipping');
+        return;
+    }
+    const allServers = getAllServers();
+    const serverNames = connectionConfig.autoConnect.servers.length > 0
+        ? connectionConfig.autoConnect.servers
+        : Array.from(allServers.keys());
+    console.log(`[AutoConnect] Auto-connecting to servers: ${serverNames.join(', ')}`);
+    // Connect to each server with a slight delay between connections
+    for (let i = 0; i < serverNames.length; i++) {
+        const serverName = serverNames[i];
+        const server = allServers.get(serverName);
+        if (!server) {
+            console.warn(`[AutoConnect] Server '${serverName}' not found in configuration`);
+            continue;
+        }
+        // Check if already connected
+        const existingConnection = Array.from(activeConnections.values()).find(conn => conn.configName === serverName && conn.status !== 'disconnected' && conn.status !== 'error');
+        if (existingConnection) {
+            console.log(`[AutoConnect] Server '${serverName}' is already connected/connecting, skipping`);
+            continue;
+        }
+        console.log(`[AutoConnect] Connecting to server '${serverName}'`);
+        await handleConnectConfigured(websocket, serverName);
+        // Add a small delay between connections to avoid overwhelming the system
+        if (i < serverNames.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+}
+/**
+ * Handle auto-reconnection for a disconnected server
+ */
+async function handleAutoReconnect(websocket, serverName) {
+    if (!connectionConfig?.reconnect.enabled) {
+        return;
+    }
+    const attempts = reconnectionAttempts.get(serverName) || 0;
+    if (attempts >= connectionConfig.reconnect.maxAttempts) {
+        console.log(`[Reconnect] Maximum reconnection attempts (${connectionConfig.reconnect.maxAttempts}) reached for '${serverName}'`);
+        reconnectionAttempts.delete(serverName);
+        return;
+    }
+    console.log(`[Reconnect] Attempting to reconnect to '${serverName}' (attempt ${attempts + 1}/${connectionConfig.reconnect.maxAttempts})`);
+    reconnectionAttempts.set(serverName, attempts + 1);
+    // Wait before reconnecting
+    await new Promise(resolve => setTimeout(resolve, connectionConfig.reconnect.delayMs));
+    // Check if any existing connection exists before reconnecting
+    const existingConnection = Array.from(activeConnections.values()).find(conn => conn.configName === serverName && (conn.status === 'connected' || conn.status === 'connecting'));
+    if (existingConnection) {
+        console.log(`[Reconnect] Server '${serverName}' is already connected/connecting, cancelling reconnection`);
+        reconnectionAttempts.delete(serverName);
+        return;
+    }
+    try {
+        await handleConnectConfigured(websocket, serverName);
+        reconnectionAttempts.delete(serverName);
+    }
+    catch (error) {
+        console.error(`[Reconnect] Failed to reconnect to '${serverName}':`, error);
     }
 }

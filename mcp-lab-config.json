@@ -6,7 +6,8 @@
             "args": [
                 "Hello from Server 1"
             ],
-            "description": "A simple example server."
+            "description": "A simple example server.",
+            "category": "Examples"
         },
         "HelloWorld": {
             "type": "stdio",
@@ -18,12 +19,14 @@
                 "server.py",
                 "--stdio"
             ],
-            "description": "A simple example server."
+            "description": "A simple example server.",
+            "category": "Examples"
         },
         "ExampleServer2": {
             "type": "websocket",
             "url": "ws://localhost:8081",
-            "description": "Another example server (WebSocket)."
+            "description": "Another example server (WebSocket).",
+            "category": "Examples"
         },
         "OfficialCalculator": {
             "type": "stdio",
@@ -32,7 +35,8 @@
                 "@modelcontextprotocol/example-calculator@latest",
                 "--stdio"
             ],
-            "description": "Official MCP Calculator Example Server"
+            "description": "Official MCP Calculator Example Server",
+            "category": "Official"
         },
         "Git": {
             "type": "stdio",
@@ -41,7 +45,8 @@
                 "@cyanheads/git-mcp-server",
                 "--stdio"
             ],
-            "description": "Git MCP Server"
+            "description": "Git MCP Server",
+            "category": "Development"
         },
         "everything": {
             "type": "stdio",
@@ -54,7 +59,61 @@
                 "NODE_PATH": "/usr/bin/node",
                 "PATH": "/usr/local/bin:/usr/bin:/bin"
             },
-            "description": "Everything MCP Server - Provides tools, resources, and prompts"
+            "description": "Everything MCP Server - Provides tools, resources, and prompts",
+            "category": "Official"
+        }
+    },
+    "autoDiscovery": {
+        "enabled": true,
+        "directories": [
+            "./mcp-lab/servers"
+        ],
+        "conventions": {
+            "lookFor": [
+                "index.js",
+                "dist/index.js",
+                "server.py"
+            ],
+            "packageSignatures": [
+                "mcp-framework",
+                "@modelcontextprotocol"
+            ]
+        },
+        "hotReload": {
+            "enabled": true,
+            "watchFiles": true,
+            "debounceMs": 1000
+        },
+        "defaultCategory": "Custom"
+    },
+    "connection": {
+        "autoConnect": {
+            "enabled": true,
+            "servers": [
+                "example1",
+                "example2"
+            ],
+            "onStartup": true,
+            "onDiscovery": true
+        },
+        "reconnect": {
+            "enabled": true,
+            "maxAttempts": 3,
+            "delayMs": 2000
+        }
+    },
+    "categories": {
+        "order": [
+            "Official",
+            "Development",
+            "Examples",
+            "Custom"
+        ],
+        "icons": {
+            "Official": "fa-check-circle",
+            "Development": "fa-code",
+            "Examples": "fa-flask",
+            "Custom": "fa-cog"
         }
     }
 }

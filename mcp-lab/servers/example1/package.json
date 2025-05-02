@@ -1,0 +1,13 @@
+{
+    "name": "mcp-example1",
+    "version": "1.0.0",
+    "description": "Example MCP Server 1",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node index.js"
+    },
+    "dependencies": {
+        "mcp-framework": "^0.2.11"
+    }
+}

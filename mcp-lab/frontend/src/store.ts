@@ -27,14 +27,21 @@ interface McpServerConfigEntry {
 // --- App State --- 
 type ActiveView = 'Resources' | 'Tools' | 'Prompts' | 'Messages' | null;
 
+// Add type for category configuration
+interface CategoryConfig {
+    order: string[];
+    icons: Record<string, string>;
+}
+
 type AppState = {
     configuredServers: McpServerDefinition[];
     connections: ServerConnection[];
     activeServerId: string | null;
     activeView: ActiveView;
     logs: string[];
+    categoryConfig?: CategoryConfig; // Add category config
     addLog: (log: string) => void;
-    setConfiguredServers: (servers: McpServerDefinition[]) => void;
+    setConfiguredServers: (servers: McpServerDefinition[], categoryConfig?: CategoryConfig) => void; // Update method signature
     updateConnectionStatus: (payload: { id: string; name: string; status: ServerConnection['status']; serverInfo?: SimpleServerInfo, error?: string, reason?: string }) => void;
     removeConnection: (id: string) => void;
     setActiveServer: (id: string | null) => void;
@@ -63,7 +70,7 @@ type AppActions = {
     setActiveView: (view: ActiveView) => void;
 
     // Configured Servers
-    setConfiguredServers: (servers: McpServerDefinition[]) => void;
+    setConfiguredServers: (servers: McpServerDefinition[], categoryConfig?: CategoryConfig) => void; // Update method signature
 
     // Data Loading (will update specific connection)
     // Types for ResourceState, ToolState, PromptState come from the imported ServerConnection type
@@ -114,7 +121,7 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         // Handle other message types by calling actions on the store instance
         switch (type) {
             case 'configuredServersList':
-                storeActions.setConfiguredServers(payload.servers || []);
+                storeActions.setConfiguredServers(payload.servers || [], payload.categoryConfig);
                 break;
             case 'connectionStatus':
                 storeActions.updateConnectionStatus(payload);
@@ -159,6 +166,7 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         activeServerId: null,
         activeView: null,
         logs: [],
+        categoryConfig: undefined,
 
         addLog: (log) => {
             const timestamp = new Date().toLocaleTimeString([], { hour12: false });
