@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs'; // Import fs for file reading
 import path from 'path'; // Import path for resolving file path
 // Use import.meta.url to get the current module's path
+import debugCreator from 'debug';
 import { fileURLToPath } from 'url';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
@@ -15,8 +16,12 @@ import {
     McpServerDefinition,
     closeWatchers,
     discoverServers,
-    refreshServers
+    refreshServers,
+    setupConfigWatcher
 } from './discovery.js';
+
+// Setup debug logger
+const debug = debugCreator('mcp-lab:backend');
 
 // Calculate the directory name of the current module
 const __filename = fileURLToPath(import.meta.url);
@@ -34,6 +39,9 @@ console.log(`Attempting to use WebSocket port: ${WS_PORT}`);
 const CONFIG_FILE_PATH = path.resolve(__dirname, '../../../mcp-lab-config.json');
 console.log(`Looking for server config at: ${CONFIG_FILE_PATH}`); // Log the path
 
+// ---- Add a new config reload flag ----
+let configReloading = false;
+
 interface ActiveMcpConnection {
     id: string; // Internal connection ID
     configName: string; // Name from the config file
@@ -42,6 +50,7 @@ interface ActiveMcpConnection {
     websocket: WebSocket; // The UI websocket connection
     status: 'connecting' | 'connected' | 'disconnected' | 'error';
     serverInfo?: SimpleServerInfo;
+    lastError?: string;
 }
 
 // Use a Map for easier lookup by server name
@@ -130,11 +139,19 @@ async function loadServerConfigs() {
 
                     if (autoDiscoveryConfig.enabled) {
                         console.log('[Discovery] Auto-discovery enabled, scanning for servers...');
-                        autoDiscoveredServers = await discoverServers(CONFIG_FILE_PATH, autoDiscoveryConfig);
+                        autoDiscoveredServers.clear(); // Clear existing auto-discovered servers
+                        const discoveredServers = await discoverServers(CONFIG_FILE_PATH, autoDiscoveryConfig);
+
+                        // Copy discovered servers to our map
+                        discoveredServers.forEach((server, name) => {
+                            autoDiscoveredServers.set(name, server);
+                        });
+
                         console.log(`[Discovery] Found ${autoDiscoveredServers.size} auto-discovered MCP servers`);
 
                         // Set up event listener for hot reload if enabled
                         if (autoDiscoveryConfig.hotReload?.enabled) {
+                            process.removeAllListeners('mcp:reload'); // Remove any existing listeners
                             process.on('mcp:reload', async ({ directory }) => {
                                 console.log(`[HotReload] Refreshing servers from ${directory}`);
                                 const result = await refreshServers(
@@ -202,6 +219,29 @@ async function loadServerConfigs() {
                                     }
                                 }
                             });
+
+                            // ---- NEW: Set up watcher for config file ----
+                            if (!configReloading) {
+                                configReloading = true;
+                                setupConfigWatcher(CONFIG_FILE_PATH, autoDiscoveryConfig.hotReload.debounceMs);
+
+                                // Add event listener for config file changes
+                                process.removeAllListeners('mcp:config-changed');
+                                process.on('mcp:config-changed', async ({ configPath }) => {
+                                    console.log(`[ConfigWatcher] Config file changed, reloading configuration...`);
+
+                                    // Reload the configuration
+                                    await loadServerConfigs();
+
+                                    // Notify all connected WebSocket clients about the updated server list
+                                    const connectedWebSockets = getConnectedWebSockets();
+                                    for (const ws of connectedWebSockets) {
+                                        sendConfiguredServersList(ws);
+                                    }
+
+                                    console.log(`[ConfigWatcher] Configuration reloaded and clients notified`);
+                                });
+                            }
                         }
                     }
                 }

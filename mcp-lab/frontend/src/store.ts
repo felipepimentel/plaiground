@@ -188,9 +188,28 @@ export const useStore = create<AppState & AppActions>((set, get) => {
             });
         },
 
-        setConfiguredServers: (servers) => {
+        setConfiguredServers: (servers, categoryConfig) => {
             console.log('[Store] Setting configured servers:', servers);
-            set({ configuredServers: servers });
+            // Add log to show when configuration is updated
+            const count = servers?.length || 0;
+            get().addLog(`[Config] Updated server configuration with ${count} servers.`);
+
+            // Check if this is a configuration change (i.e., different server list)
+            const currentServers = get().configuredServers;
+            const isConfigChanged = currentServers.length !== count ||
+                JSON.stringify(currentServers.map(s => s.name).sort()) !==
+                JSON.stringify(servers.map(s => s.name).sort());
+
+            if (isConfigChanged) {
+                console.log('[Store] Server configuration has changed');
+                get().addLog(`[Config] Server configuration changed. Previous: ${currentServers.length} servers, New: ${count} servers.`);
+            }
+
+            // Set both servers and category config
+            set({
+                configuredServers: servers,
+                categoryConfig: categoryConfig || get().categoryConfig
+            });
         },
 
         updateConnectionStatus: (payload) => {

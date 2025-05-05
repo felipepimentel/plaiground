@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ServerConnection
 } from '@mcp-lab/shared';
+import { useSnackbar } from 'notistack';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStore } from './store';
 
@@ -132,6 +133,7 @@ function useKeyboardShortcuts(shortcuts: Record<string, () => void>) {
 function ServerSelector() {
     const { sendMessage, isConnected } = useWebSocket();
     const { configuredServers, connections, activeServerId, setActiveServer } = useStore();
+    const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
 
     // Auto-select first connected server if none is selected
     useEffect(() => {
@@ -166,6 +168,13 @@ function ServerSelector() {
         console.log('[Frontend] Refreshing server list...');
         sendMessage({ type: 'refreshServers', payload: {} });
     }, [sendMessage]);
+
+    const toggleCategory = useCallback((category: string) => {
+        setCollapsedCategories(prev => ({
+            ...prev,
+            [category]: !prev[category]
+        }));
+    }, []);
 
     // Add keyboard shortcuts
     useKeyboardShortcuts({
@@ -253,21 +262,21 @@ function ServerSelector() {
                 <div className="sidebar-header-content">
                     <h3 className="sidebar-title">
                         <i className="fas fa-server icon"></i> <span>Servers</span>
-                        <span className="server-count">{serverList.length}</span>
+                        <span className="counter">{serverList.length}</span>
                     </h3>
 
                     <div className="sidebar-actions">
                         <button
                             onClick={handleRefreshServers}
-                            className="btn btn-xs btn-refresh"
+                            className="btn-xs btn-secondary"
                             disabled={!isConnected}
                             data-tooltip="Refresh Server List (R)"
                         >
-                            <i className="fas fa-sync-alt"></i>
+                            <i className="fas fa-sync-alt"></i> Refresh
                         </button>
                         <button
                             onClick={handleConnectAll}
-                            className="btn btn-xs btn-connect-all"
+                            className="btn-connect-all"
                             disabled={!isConnected || configuredServers.length === 0}
                             data-tooltip="Connect All Servers (C)"
                         >
@@ -294,73 +303,78 @@ function ServerSelector() {
                 ) : (
                     categorizedServers.map(category => (
                         <div key={category.name} className="server-category">
-                            <div className="category-header">
+                            <div
+                                className={`category-header ${collapsedCategories[category.name] ? 'collapsed' : ''}`}
+                                onClick={() => toggleCategory(category.name)}
+                            >
                                 <i className={`fas ${category.icon}`}></i>
                                 <span>{category.name}</span>
                                 <span className="server-count">{category.servers.length}</span>
                             </div>
-                            <ul className="server-list">
-                                {category.servers.map((server) => {
-                                    const isActive = server.connectionId === activeServerId;
-                                    const canBeActive = server.connectionId && server.status === 'connected';
-                                    const statusDetails = getStatusDetails(server.status);
+                            <div className={`server-category-content ${collapsedCategories[category.name] ? 'collapsed' : ''}`}>
+                                <ul className="server-list">
+                                    {category.servers.map((server) => {
+                                        const isActive = server.connectionId === activeServerId;
+                                        const canBeActive = server.connectionId && server.status === 'connected';
+                                        const statusDetails = getStatusDetails(server.status);
 
-                                    return (
-                                        <li key={server.name}
-                                            className={`server-item ${isActive ? 'active' : ''} ${canBeActive ? 'can-activate' : ''}`}
-                                            onClick={() => canBeActive && setActiveServer(server.connectionId)}
-                                            data-tooltip={`${statusDetails.text}: ${server.name}`}
-                                        >
-                                            <div className="server-item-header">
-                                                <span className={`status-indicator ${statusDetails.class}`}></span>
-                                                <span className="server-name">{server.name}</span>
-                                            </div>
-
-                                            {server.description && (
-                                                <div className="server-description">
-                                                    {server.description}
+                                        return (
+                                            <li key={server.name}
+                                                className={`server-item ${isActive ? 'active' : ''} ${canBeActive ? 'can-activate' : ''}`}
+                                                onClick={() => canBeActive && setActiveServer(server.connectionId)}
+                                                data-tooltip={`${statusDetails.text}: ${server.name}`}
+                                            >
+                                                <div className="server-item-header">
+                                                    <span className={`status-indicator ${statusDetails.class}`}></span>
+                                                    <span className="server-name">{server.name}</span>
                                                 </div>
-                                            )}
 
-                                            {server.status === 'connecting' && (
-                                                <div className="server-description text-amber-600">
-                                                    <i className="fas fa-spinner fa-spin"></i> Connecting...
-                                                </div>
-                                            )}
-
-                                            {server.status === 'error' && (
-                                                <div className="server-error">
-                                                    <i className="fas fa-exclamation-triangle"></i> Connection error
-                                                </div>
-                                            )}
-
-                                            <div className="server-actions">
-                                                {server.status === 'connected' || server.status === 'connecting' ? (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); server.connectionId && handleDisconnect(server.connectionId); }}
-                                                        className="btn-disconnect"
-                                                        disabled={server.status === 'connecting'}
-                                                        title={`Disconnect from ${server.name}`}
-                                                    >
-                                                        <i className="fas fa-times-circle"></i>
-                                                        <span>{server.status === 'connecting' ? 'Connecting...' : 'Disconnect'}</span>
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleConnect(server.name); }}
-                                                        className="btn-connect"
-                                                        disabled={!isConnected}
-                                                        title={`Connect to ${server.name}`}
-                                                    >
-                                                        <i className="fas fa-plug"></i>
-                                                        <span>Connect</span>
-                                                    </button>
+                                                {server.description && (
+                                                    <div className="server-description">
+                                                        {server.description}
+                                                    </div>
                                                 )}
-                                            </div>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
+
+                                                {server.status === 'connecting' && (
+                                                    <div className="server-description" style={{ color: '#f59e0b' }}>
+                                                        <i className="fas fa-spinner fa-spin"></i> Connecting...
+                                                    </div>
+                                                )}
+
+                                                {server.status === 'error' && (
+                                                    <div className="server-error">
+                                                        <i className="fas fa-exclamation-triangle"></i> Connection error
+                                                    </div>
+                                                )}
+
+                                                <div className="server-actions">
+                                                    {server.status === 'connected' || server.status === 'connecting' ? (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); server.connectionId && handleDisconnect(server.connectionId); }}
+                                                            className="btn-disconnect"
+                                                            disabled={server.status === 'connecting'}
+                                                            title={`Disconnect from ${server.name}`}
+                                                        >
+                                                            <i className="fas fa-times-circle"></i>
+                                                            <span>{server.status === 'connecting' ? 'Connecting...' : 'Disconnect'}</span>
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleConnect(server.name); }}
+                                                            className="btn-connect"
+                                                            disabled={!isConnected}
+                                                            title={`Connect to ${server.name}`}
+                                                        >
+                                                            <i className="fas fa-plug"></i>
+                                                            <span>Connect</span>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </div>
                         </div>
                     ))
                 )}
@@ -850,12 +864,33 @@ function MainContentArea() {
 // --- App Component (Root) ---
 function App() {
     const { isConnected } = useWebSocket();
-    const { connections } = useStore();
+    const { connections, configuredServers } = useStore();
+    const { enqueueSnackbar } = useSnackbar();
     const [isDarkMode, setIsDarkMode] = useState(() => {
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme) return savedTheme === 'dark';
         return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     });
+
+    // Monitor configuration changes to show notifications
+    const serverCount = configuredServers.length;
+    useEffect(() => {
+        if (serverCount > 0) {
+            // Only show notification after initial load
+            const lastServerCount = parseInt(localStorage.getItem('lastServerCount') || '0', 10);
+            if (lastServerCount > 0 && lastServerCount !== serverCount) {
+                enqueueSnackbar(
+                    `Configuração atualizada: ${serverCount} servidores disponíveis`,
+                    {
+                        variant: 'info',
+                        autoHideDuration: 5000,
+                        anchorOrigin: { vertical: 'top', horizontal: 'center' }
+                    }
+                );
+            }
+            localStorage.setItem('lastServerCount', serverCount.toString());
+        }
+    }, [serverCount, enqueueSnackbar]);
 
     // Add keyboard shortcut for theme toggle
     useKeyboardShortcuts({

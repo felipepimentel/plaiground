@@ -69,7 +69,7 @@ export async function discoverServers(
             for (const serverDir of subdirs) {
                 const serverName = path.basename(serverDir);
                 const serverConfig = await detectMcpServer(
-                    serverDir, 
+                    serverDir,
                     autoDiscoveryConfig.conventions,
                     autoDiscoveryConfig.defaultCategory
                 );
@@ -253,4 +253,41 @@ export async function refreshServers(
     console.log(`[HotReload] Refresh found ${changes.size} new/changed servers and ${removed.size} removed servers`);
 
     return { changes, removed, all: freshServers };
+}
+
+/**
+ * Set up a configuration file watcher
+ */
+export function setupConfigWatcher(configPath: string, debounceMs: number) {
+    // Get the directory and filename of the config
+    const configDir = path.dirname(configPath);
+    const configFile = path.basename(configPath);
+
+    console.log(`[ConfigWatcher] Setting up watcher for ${configPath}`);
+
+    // Create watcher specifically for the config file
+    const watcher = watch(configPath, {
+        persistent: true,
+        ignoreInitial: true,
+        awaitWriteFinish: {
+            stabilityThreshold: debounceMs,
+            pollInterval: 100
+        }
+    });
+
+    let timeout: NodeJS.Timeout;
+
+    const debouncedEmit = () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+            console.log(`[ConfigWatcher] Changes detected in ${configPath}`);
+            process.emit('mcp:config-changed', { configPath });
+        }, debounceMs);
+    };
+
+    watcher.on('change', debouncedEmit);
+
+    // Store in watchers with a special key
+    watchers[`config:${configPath}`] = watcher;
+    console.log(`[ConfigWatcher] Watching ${configPath} for changes`);
 } 
