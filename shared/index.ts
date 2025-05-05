@@ -15,6 +15,7 @@ export interface McpServerDefinition {
     cwd?: string;
     // Websocket specific
     url?: string;
+    category?: string;
 }
 
 // --- MCP Primitive Types ---

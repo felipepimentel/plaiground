@@ -9,13 +9,6 @@ import {
     ToolState
 } from '@mcp-lab/shared';
 
-// Define structure for server config entries from backend
-interface McpServerConfigEntry {
-    id: string;
-    name: string;
-    description?: string;
-}
-
 // Define types for state slices
 // export type ResourceState = Resource[];
 // export type ToolState = ToolDefinition[];
@@ -46,9 +39,9 @@ type AppState = {
     removeConnection: (id: string) => void;
     setActiveServer: (id: string | null) => void;
     setActiveView: (view: ActiveView) => void;
-    setResources: (connectionId: string, resources: ResourceState | null) => void;
-    setTools: (connectionId: string, tools: ToolState | null) => void;
-    setPrompts: (connectionId: string, prompts: PromptState | null) => void;
+    setResources: (connectionId: string, resources: ResourceState | undefined) => void;
+    setTools: (connectionId: string, tools: ToolState | undefined) => void;
+    setPrompts: (connectionId: string, prompts: PromptState | undefined) => void;
     setResourceContent: (connectionId: string, uri: string, content: any, error?: string) => void;
     setToolResult: (connectionId: string, toolName: string, result: any, error?: string) => void;
     setPromptMessages: (connectionId: string, promptName: string, messages: any[], error?: string) => void;
@@ -74,9 +67,9 @@ type AppActions = {
 
     // Data Loading (will update specific connection)
     // Types for ResourceState, ToolState, PromptState come from the imported ServerConnection type
-    setResources: (connectionId: string, resources: ResourceState | null) => void;
-    setTools: (connectionId: string, tools: ToolState | null) => void;
-    setPrompts: (connectionId: string, prompts: PromptState | null) => void;
+    setResources: (connectionId: string, resources: ResourceState | undefined) => void;
+    setTools: (connectionId: string, tools: ToolState | undefined) => void;
+    setPrompts: (connectionId: string, prompts: PromptState | undefined) => void;
     setResourceContent: (connectionId: string, uri: string, content: any, error?: string) => void;
     setToolResult: (connectionId: string, toolName: string, result: any, error?: string) => void;
     setPromptMessages: (connectionId: string, promptName: string, messages: any[], error?: string) => void;
@@ -127,13 +120,13 @@ export const useStore = create<AppState & AppActions>((set, get) => {
                 storeActions.updateConnectionStatus(payload);
                 break;
             case 'resourcesList':
-                storeActions.setResources(payload.connectionId, payload.data?.resources || null);
+                storeActions.setResources(payload.connectionId, payload.data?.resources || undefined);
                 break;
             case 'toolsList':
-                storeActions.setTools(payload.connectionId, payload.data?.tools || null);
+                storeActions.setTools(payload.connectionId, payload.data?.tools || undefined);
                 break;
             case 'promptsList':
-                storeActions.setPrompts(payload.connectionId, payload.data?.prompts || null);
+                storeActions.setPrompts(payload.connectionId, payload.data?.prompts || undefined);
                 break;
             case 'resourceContent':
                 storeActions.setResourceContent(payload.connectionId, payload.uri, payload.content, payload.error);
@@ -361,5 +354,8 @@ export const useStore = create<AppState & AppActions>((set, get) => {
                 get().addLog(`[MCP Debug] ${type} received: ${count} items`);
             }
         },
+
+        addConnection: () => { },
+        updateConnection: () => { },
     };
 }); 

@@ -10,6 +10,7 @@ export interface McpServerDefinition {
     args?: string[];
     cwd?: string;
     url?: string;
+    category?: string;
 }
 export interface SimpleResource {
     uri: string;

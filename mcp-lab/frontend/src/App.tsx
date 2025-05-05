@@ -12,85 +12,51 @@ type ActiveView = 'Resources' | 'Tools' | 'Prompts' | 'Messages' | null;
 
 // --- Constants for Styling ---
 // UI color palette sourced from Tailwind variables
-const colors = {
-    primary: {
-        light: 'bg-primary-50',
-        main: 'bg-primary-500',
-        dark: 'bg-primary-700',
-        text: 'text-primary-600',
-        border: 'border-primary-500',
-        hover: 'hover:bg-primary-600',
-    },
-    secondary: {
-        light: 'bg-gray-50',
-        main: 'bg-gray-100',
-        dark: 'bg-gray-200',
-        text: 'text-gray-700',
-        border: 'border-gray-300',
-        hover: 'hover:bg-gray-100',
-    },
-    success: {
-        main: 'bg-green-500',
-        text: 'text-green-500',
-        border: 'border-green-500',
-    },
-    warning: {
-        main: 'bg-amber-500',
-        text: 'text-amber-500',
-        border: 'border-amber-500',
-    },
-    error: {
-        main: 'bg-red-500',
-        text: 'text-red-500',
-        border: 'border-red-500',
-        light: 'bg-red-50',
-    },
-};
 
 // Panel styling
-const panelPadding = "p-4";
-const panelBg = "bg-white";
-const panelBorder = "border-r border-gray-200";
-const panelShadow = "shadow-sm";
-const panelRounded = "rounded-lg";
+// const panelPadding = "p-4";
+// const panelBg = "bg-white";
+// const panelBorder = "border-r border-gray-200";
+// const panelShadow = "shadow-sm";
+// const panelRounded = "rounded-lg";
 
 // Typography
-const titleClass = "text-lg font-semibold mb-4 text-gray-800";
-const subtitleClass = "text-base font-medium mb-3 text-gray-700";
-const textClass = "text-sm text-gray-600";
+// const titleClass = "text-lg font-semibold mb-4 text-gray-800";
+// const subtitleClass = "text-base font-medium mb-3 text-gray-700";
+// const textClass = "text-sm text-gray-600";
 
 // Lists
-const listClass = "list-none p-0 m-0 space-y-1";
-const listItemBaseClass = "p-2 rounded-md text-sm transition-all duration-200 ease-in-out";
-const listItemHoverClass = "hover:bg-gray-100";
-const listItemActiveClass = `${colors.primary.light} ${colors.primary.text} font-medium`;
+// const listClass = "list-none p-0 m-0 space-y-1";
+// const listItemBaseClass = "p-2 rounded-md text-sm transition-all duration-200 ease-in-out";
+// const listItemHoverClass = "hover:bg-gray-100";
+// const listItemActiveClass = `${colors.primary.light} ${colors.primary.text} font-medium`;
 
 // Buttons
-const buttonBaseClass = "px-4 py-2 text-sm rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-400 transition-all duration-200 ease-in-out font-medium";
-const buttonPrimaryClass = `${buttonBaseClass} ${colors.primary.main} text-white ${colors.primary.hover} disabled:opacity-50 disabled:cursor-not-allowed`;
-const buttonSecondaryClass = `${buttonBaseClass} bg-white ${colors.secondary.text} ${colors.secondary.hover} border ${colors.secondary.border} disabled:opacity-50 disabled:cursor-not-allowed`;
-const buttonSmallClass = "px-3 py-1.5 text-xs";
+// const buttonBaseClass = "px-4 py-2 text-sm rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-400 transition-all duration-200 ease-in-out font-medium";
+// const buttonPrimaryClass = `${buttonBaseClass} ${colors.primary.main} text-white ${colors.primary.hover} disabled:opacity-50 disabled:cursor-not-allowed`;
+// const buttonSecondaryClass = `${buttonBaseClass} bg-white ${colors.secondary.text} ${colors.secondary.hover} border ${colors.secondary.border} disabled:opacity-50 disabled:cursor-not-allowed`;
+// const buttonSmallClass = "px-3 py-1.5 text-xs";
 
 // Inputs
-const inputBaseClass = "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100";
-const labelClass = "block text-sm font-medium text-gray-700 mb-1";
-const formGroupClass = "mb-4";
+// const inputBaseClass = "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100";
+// const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+// const formGroupClass = "mb-4";
 
 // Code and pre-formatted text
-const preformattedClass = "text-sm whitespace-pre-wrap break-all bg-gray-50 p-3 border border-gray-200 rounded-md font-mono max-h-96 overflow-y-auto";
-const errorPreformattedClass = "text-red-700 bg-red-50 p-3 rounded-md border border-red-200 text-sm whitespace-pre-wrap break-all font-mono";
-const emptyStateClass = "text-gray-500 italic p-6 text-center";
+// const preformattedClass = "text-sm whitespace-pre-wrap break-all bg-gray-50 p-3 border border-gray-200 rounded-md font-mono max-h-96 overflow-y-auto";
+// const errorPreformattedClass = "text-red-700 bg-red-50 p-3 rounded-md border border-red-200 text-sm whitespace-pre-wrap break-all font-mono";
+// const emptyStateClass = "text-gray-500 italic p-6 text-center";
 
 // Status indicators
-const statusIndicator = {
-    connected: `text-green-500`,
-    connecting: `text-amber-500 animate-pulse`,
-    disconnected: `text-gray-400`,
-    error: `text-red-500`,
-};
+// const statusIndicator = {
+//     connected: `text-green-500`,
+//     connecting: `text-amber-500 animate-pulse`,
+//     disconnected: `text-gray-400`,
+//     error: `text-red-500`,
+// };
 
 // Cards
-const cardClass = `bg-white ${panelShadow} ${panelRounded} border ${colors.secondary.border} overflow-hidden`;
+// const cardClass = `bg-white ${panelShadow} ${panelRounded} border ${colors.secondary.border} overflow-hidden`;
 
 // --- Helper function to get status details ---
 const getStatusDetails = (status: ServerConnection['status']) => {
@@ -236,7 +202,7 @@ function ServerSelector() {
         });
 
         // Return categories in the specified order, with any remaining categories alphabetically
-        const sortedCategories = [];
+        const sortedCategories: any[] = [];
 
         // First add categories in the specified order
         categoryOrder.forEach(categoryName => {
@@ -313,7 +279,7 @@ function ServerSelector() {
                             </div>
                             <div className={`server-category-content ${collapsedCategories[category.name] ? 'collapsed' : ''}`}>
                                 <ul className="server-list">
-                                    {category.servers.map((server) => {
+                                    {category.servers.map((server: any) => {
                                         const isActive = server.connectionId === activeServerId;
                                         const canBeActive = server.connectionId && server.status === 'connected';
                                         const statusDetails = getStatusDetails(server.status);
@@ -432,7 +398,7 @@ function Navigation() {
         <div className={`navigation ${!activeServerId ? 'navigation-disabled' : ''}`}>
             <div className="nav-header">
                 <h3 className="sidebar-title">
-                    <i className="fas fa-compass"></i> <span>Explore</span>
+                    <i className="fas fa-compass icon"></i> <span>Explore</span>
                 </h3>
             </div>
             <ul className="nav-menu">
@@ -458,7 +424,8 @@ function Navigation() {
 
             {!activeServerId && (
                 <div className="nav-disabled-message">
-                    <i className="fas fa-info-circle"></i> Select a connected server to explore.
+                    <i className="fas fa-info-circle"></i>
+                    <p>Select a connected server to explore.</p>
                 </div>
             )}
         </div>
@@ -474,7 +441,7 @@ function NoServerSelectedPlaceholder() {
             <p className="placeholder-text">
                 Connect to or select a server from the sidebar to begin exploring available resources and tools.
             </p>
-            <div className="placeholder-actions mt-6">
+            <div className="placeholder-actions">
                 <div className="instruction-step">
                     <div className="step-number">1</div>
                     <div className="step-text">
@@ -494,17 +461,17 @@ function NoServerSelectedPlaceholder() {
                     </div>
                 </div>
             </div>
-            <div className="shortcut-guide mt-8">
-                <h3 className="text-gray-300 text-sm font-semibold mb-2">Keyboard Shortcuts</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm text-gray-400">
+            <div className="shortcut-guide">
+                <h3>Keyboard Shortcuts</h3>
+                <div className="grid grid-cols-2 gap-4">
                     <div className="flex items-center">
-                        <span className="shortcut-hint mr-2">R</span> Refresh servers
+                        <span className="shortcut-hint">R</span> Refresh servers
                     </div>
                     <div className="flex items-center">
-                        <span className="shortcut-hint mr-2">C</span> Connect all servers
+                        <span className="shortcut-hint">C</span> Connect all servers
                     </div>
                     <div className="flex items-center">
-                        <span className="shortcut-hint mr-2">1-4</span> Switch views
+                        <span className="shortcut-hint">1-4</span> Switch views
                     </div>
                 </div>
             </div>
@@ -513,7 +480,7 @@ function NoServerSelectedPlaceholder() {
 }
 
 // Update the Loading State Component
-function LoadingPlaceholder({ title, message }) {
+function LoadingPlaceholder({ title, message }: { title: string; message: string }) {
     return (
         <div className="content-placeholder">
             <div className="loading-spinner"></div>
@@ -634,11 +601,11 @@ function MainContentArea() {
                                     <i className="fas fa-list-ul"></i> Parameters
                                 </div>
                                 <ul className="prompt-arguments-list">
-                                    {Object.entries(tool.parameters).map(([name, param]) => (
+                                    {Object.entries(tool.parameters).map(([name]) => (
                                         <li key={name} className="prompt-argument-item">
                                             <span className="prompt-argument-name">{name}</span>
-                                            <span className="prompt-argument-type">{param.type}</span>
-                                            {param.description && <span className="prompt-argument-description">{param.description}</span>}
+                                            {/* <span className="prompt-argument-type">{param.type}</span> */}
+                                            {/* {param.description && <span className="prompt-argument-description">{param.description}</span>} */}
                                         </li>
                                     ))}
                                 </ul>
@@ -693,33 +660,10 @@ function MainContentArea() {
                         <p className="prompt-description">{prompt.description}</p>
 
                         <div className="prompt-meta">
-                            {prompt.arguments && (
-                                <span className="prompt-meta-item">
-                                    <i className="fas fa-list"></i>
-                                    {prompt.arguments.length} arguments
-                                </span>
-                            )}
                             <span className="prompt-meta-item">
                                 <i className="fas fa-tag"></i> Template
                             </span>
                         </div>
-
-                        {prompt.arguments && prompt.arguments.length > 0 && (
-                            <div className="prompt-arguments">
-                                <div className="prompt-arguments-header">
-                                    <i className="fas fa-list-ul"></i> Arguments
-                                </div>
-                                <ul className="prompt-arguments-list">
-                                    {prompt.arguments.map((arg, index) => (
-                                        <li key={index} className="prompt-argument-item">
-                                            <span className="prompt-argument-name">{arg.name}</span>
-                                            <span className="prompt-argument-type">{arg.type}</span>
-                                            {arg.description && <span className="prompt-argument-description">{arg.description}</span>}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
 
                         <div className="card-actions">
                             <button className="card-action-btn" title="Copy prompt name">
@@ -776,7 +720,6 @@ function MainContentArea() {
             case 'Resources': return renderResourcesContent();
             case 'Tools': return renderToolsContent();
             case 'Prompts': return renderPromptsContent();
-            case 'Messages': return renderMessagesContent();
             default:
                 // If connected but no view selected, default to Resources if available, else show placeholder
                 if (activeConnection.resources !== undefined) {
@@ -813,10 +756,6 @@ function MainContentArea() {
                 icon = "fas fa-comment-dots";
                 count = activeConnection.prompts?.length;
                 break;
-            case 'Messages':
-                icon = "fas fa-envelope";
-                count = activeConnection.rawWsMessages?.length;
-                break;
         }
         return { icon, title, count };
     }
@@ -828,19 +767,19 @@ function MainContentArea() {
                 <div className="main-area-header">
                     <div className="flex items-center">
                         <h2 className="main-area-title">
-                            {headerDetails.icon && <i className={`${headerDetails.icon} text-primary-500 mr-2`}></i>}
+                            {headerDetails.icon && <i className={`${headerDetails.icon}`}></i>}
                             <span>{headerDetails.title}</span>
                         </h2>
                         <div className="server-badge">
-                            <i className="fas fa-server mr-1"></i> {activeConnection.name}
+                            <i className="fas fa-server"></i> {activeConnection.name}
                         </div>
                         {headerDetails.count !== undefined && (
-                            <div className="items-count ml-2">
+                            <div className="items-count">
                                 {headerDetails.count}
                             </div>
                         )}
                     </div>
-                    {activeView === 'Resources' && activeConnection.resources?.length > 0 && (
+                    {activeView === 'Resources' && (activeConnection.resources?.length ?? 0) > 0 && (
                         <div className="view-actions">
                             <div className="search-box">
                                 <i className="fas fa-search search-icon"></i>

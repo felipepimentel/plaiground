@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 
 // Get port from environment variable set by Vite
-const WS_PORT = import.meta.env.VITE_WS_PORT || '8080'; // Default if not set
+const WS_PORT = (import.meta as any).env.VITE_WS_PORT || '8080'; // Default if not set
 const WS_URL = `ws://localhost:${WS_PORT}`;
 console.log(`Frontend attempting WebSocket connection to: ${WS_URL}`);
 
@@ -23,8 +23,8 @@ const INITIAL_CONNECT_DELAY_MS = 500; // New: Delay before first attempt
 
 export function useWebSocket() {
     const ws = useRef<WebSocket | null>(null);
-    const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const pendingMessagesRef = useRef<Map<string, { timer: NodeJS.Timeout, data: string }>>(new Map());
+    const reconnectTimerRef = useRef<number | null>(null);
+    const pendingMessagesRef = useRef<Map<string, { timer: number, data: string }>>(new Map());
     const [isConnected, setIsConnected] = useState(false);
     const activeServerId = useStore(state => state.activeServerId);
     const { enqueueSnackbar } = useSnackbar();
@@ -39,19 +39,9 @@ export function useWebSocket() {
     const messageQueueRef = useRef<object[]>([]);
 
     const {
-        addConnection,
-        updateConnection,
-        removeConnection,
         addLog,
-        setResources,
-        setTools,
-        setPrompts,
-        setViewedResourceContent,
-        setLastToolResult,
-        setPromptMessages,
-        addRawWsMessage,
-        setConfiguredServers,
-        handleWsMessage
+        handleWsMessage,
+        addRawWsMessage
     } = useStore();
 
     // --- Define sendMessage FIRST (without useCallback) ---
